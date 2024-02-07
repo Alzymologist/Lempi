@@ -1,0 +1,18 @@
+[package]
+name = "lempi"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+frame-metadata = "16.0.0"
+hex = "0.4.3"
+jsonrpsee = { version = "0.20.0", features = ["full"] }
+parity-scale-codec = {version = "3.6.5", features = ["derive"]}
+serde = { version = "1.0.188", features = ["derive"] }
+serde_json = "1.0.106"
+substrate-constructor = { git = "https://github.com/Alzymologist/substrate-constructor" }
+termwiz = { version = "0.20.0", features = ["widgets"] }
+tokio = { version = "1.35.1", features = ["full"] }
+
