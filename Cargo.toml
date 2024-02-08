@@ -13,6 +13,6 @@ parity-scale-codec = {version = "3.6.5", features = ["derive"]}
 serde = { version = "1.0.188", features = ["derive"] }
 serde_json = "1.0.106"
 substrate-constructor = { git = "https://github.com/Alzymologist/substrate-constructor" }
-termwiz = { version = "0.20.0", features = ["widgets"] }
+termwiz = { version = "0.22.0" }
 tokio = { version = "1.35.1", features = ["full"] }
 

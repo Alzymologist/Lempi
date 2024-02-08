@@ -1,56 +1,34 @@
-use frame_metadata::{v14::RuntimeMetadataV14, RuntimeMetadata};
+use frame_metadata::v14::RuntimeMetadataV14;
 
-use substrate_constructor::fill_prepare::TransactionToFill;
+use substrate_constructor::fill_prepare::{MultiAddress, TransactionToFill, TypeContentToFill, TypeToFill, VariantSelector};
 
-use termwiz::color::AnsiColor;
-use termwiz::input::{InputEvent, KeyCode, KeyEvent};
-use termwiz::surface::Change;
-use termwiz::widgets::{layout, RenderArgs, UpdateArgs, Widget, WidgetEvent};
-
-use tokio::sync::broadcast;
-
-use crate::chain;
-
-pub struct ExtrinsicBuilder {
-    //transaction: &'a TransactionToFill,
+pub enum SelectedArea {
+    Author,
+    Call,
+    Extensions,
 }
 
-impl<'a> ExtrinsicBuilder {
-    pub fn new() -> Self {
-        Self{
-            //transaction,
+pub struct Builder {
+    transaction: TransactionToFill,
+    selected_area: SelectedArea,
+}
+
+impl Builder {
+    pub fn new(metadata: RuntimeMetadataV14) -> Self {
+        let transaction = TransactionToFill::init(&mut (), &metadata).unwrap();
+        let selected_area = SelectedArea::Call;
+        Self {
+            transaction,
+            selected_area,
         }
     }
-}
 
-impl Widget for ExtrinsicBuilder {
-    /*
-    fn process_event(&mut self, event: &WidgetEvent, _args: &mut UpdateArgs) -> bool {
-        /*
-            match event {
-                WidgetEvent::Input(InputEvent::Key(KeyEvent {
-                    key: KeyCode::Char(c),
-                    ..
-                })) => self.text.push(*c),
-                WidgetEvent::Input(InputEvent::Key(KeyEvent {
-                    key: KeyCode::Enter,
-                    ..
-                })) => {
-                    self.text.push_str("\r\n");
-                }
-                WidgetEvent::Input(InputEvent::Paste(s)) => {
-                    self.text.push_str(&s);
-                }
-                _ => {}
-            }
-        */
-        true // handled it all
+    pub fn author(&self) -> &Option<MultiAddress> {
+        &self.transaction.author
     }
-    */
 
-    fn render(&mut self, args: &mut RenderArgs) {
-        args.surface.add_change(Change::ClearScreen(AnsiColor::Black.into()));
-        //args.surface.add_change(format!("Extrinsic builder!\n\n\nCall:\n{:?}\n\nExtensions:\n{:?}", self.transaction.call, self.transaction.extensions));
+    pub fn call(&self) -> &TypeToFill {
+        &self.transaction.call
     }
 }
 
