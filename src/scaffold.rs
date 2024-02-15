@@ -44,7 +44,7 @@ impl Scaffold {
     }
 
     fn vsplit(&self) -> usize {
-        self.size.cols * 3 / 4
+        self.size.cols * 1 / 2
     }
 
     pub fn header(&self) -> Location {
@@ -64,7 +64,7 @@ impl Scaffold {
     }
 
     pub fn call(&self) -> Location {
-        let line = self.size.rows / 10;
+        let line = self.size.rows / 10 + 2;
         let column = 0;
         let width = self.vsplit() - 1;
         let height = self.size.rows * 6 / 10;
@@ -72,11 +72,23 @@ impl Scaffold {
     }
 
     pub fn extensions(&self) -> Location {
-        let line = self.size.rows * 6 / 10;
+        let line = self.size.rows * 7 / 10 + 2;
         let column = 0;
         let width = self.vsplit() - 1;
-        let height = self.size.rows - 1;
+        let height = self.size.rows - self.size.rows * 7 / 10 + 2;
         Location{line, column, height, width}
+    }
+
+    pub fn details_panel(&self) -> Location {
+        let line = 2;
+        let column = self.vsplit() + 1;
+        let width = self.vsplit() - 1;
+        let height = self.size.rows - 2;
+        Location{line, column, height, width}
+    }
+
+    pub fn details_separator(&self) -> Location {
+        Location{line: 1, column: self.vsplit(), height: self.size.rows-2, width: 1}
     }
 }
 

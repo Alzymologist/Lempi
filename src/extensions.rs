@@ -7,17 +7,18 @@ use termwiz::surface::{Change, Surface};
 
 use crate::extrinsic_builder::Card;
 
-pub struct CallField {
+pub struct ExtensionsField {
     surface: Surface,
 }
 
-impl CallField {
+impl ExtensionsField {
     pub fn new(surface: Surface) -> Self {
         Self { surface }
     }
 
     pub fn render(&mut self, cards: Vec<Card>, position: &usize) -> &Surface {
         self.surface.add_change(Change::ClearScreen(AnsiColor::Black.into()));
+        
         for (depth, card) in cards.into_iter().enumerate() {
             self.render_field(card, *position==depth)
         }

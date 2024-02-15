@@ -13,7 +13,7 @@ impl AuthorField {
         Self { surface }
     }
 
-    pub fn render(&mut self, author: &Option<MultiAddress>, _position: usize) -> &Surface {
+    pub fn render(&mut self, author: &Option<MultiAddress>, _position: &usize) -> &Surface {
         self.surface.add_change(Change::ClearScreen(AnsiColor::Black.into()));
         self.surface.add_change(format!("Author: {:?}", author));
         &self.surface

@@ -20,6 +20,12 @@ use author::AuthorField;
 mod call;
 use call::CallField;
 
+mod details;
+use details::Details;
+
+mod extensions;
+use extensions::ExtensionsField;
+
 mod extrinsic_builder;
 use extrinsic_builder::{Builder, SelectedArea};
 
@@ -73,6 +79,9 @@ async fn main() -> Result<(), Error> {
     header.add_change(Change::ClearScreen(AnsiColor::Blue.into()));
     header.add_change("=====Substrate low-fi client!=====");
     buf.draw_from_screen(&header, scaffold.header().column(), scaffold.header().line());
+    let mut separator = scaffold.details_separator().surface();
+    separator.add_change(Change::ClearScreen(AnsiColor::Blue.into()));
+    buf.draw_from_screen(&separator, scaffold.details_separator().column(), scaffold.details_separator().line());
     buf.flush()?;
 
     let mut block = scaffold.block().surface();
@@ -84,10 +93,16 @@ async fn main() -> Result<(), Error> {
     */
    
     let mut author_field = AuthorField::new(scaffold.author().surface());
-    buf.draw_from_screen(author_field.render(builder.author(), 0), scaffold.author().column(), scaffold.author().line());
+    buf.draw_from_screen(author_field.render(builder.author(), &builder.position()), scaffold.author().column(), scaffold.author().line());
     
     let mut call_field = CallField::new(scaffold.call().surface());
-    buf.draw_from_screen(call_field.render(builder.call(), 0), scaffold.call().column(), scaffold.call().line());
+    buf.draw_from_screen(call_field.render(builder.call(), &builder.position()), scaffold.call().column(), scaffold.call().line());
+    
+    let mut extensions_field = ExtensionsField::new(scaffold.extensions().surface());
+    buf.draw_from_screen(extensions_field.render(builder.extensions(), &0), scaffold.extensions().column(), scaffold.extensions().line());
+
+    let mut details_field = Details::new(scaffold.details_panel().surface());
+    buf.draw_from_screen(details_field.render(builder.details(builder.position())), scaffold.details_panel().column(), scaffold.details_panel().line());
 
     loop {
         if let Some(a) = chain::plop(&mut block_rx) {
@@ -110,6 +125,7 @@ async fn main() -> Result<(), Error> {
                     buf.flush()?;
                     break;
                 },
+                InputEvent::Paste(s) => builder.paste(s),
                 // Area-specific buttons
                 InputEvent::Key(key) => {
                     match selected_area {
@@ -121,19 +137,61 @@ async fn main() -> Result<(), Error> {
                                 } => {},
                                 _ => {},
                             };
-                            buf.draw_from_screen(author_field.render(builder.author(), 0), scaffold.author().column(), scaffold.author().line());
+                            buf.draw_from_screen(author_field.render(builder.author(), &builder.position()), scaffold.author().column(), scaffold.author().line());
                         },
                         SelectedArea::Call => {
                             match key {
                                 KeyEvent {
-                                    key: KeyCode::Char(' '),
+                                    key: KeyCode::UpArrow,
                                     ..
-                                } => {},
+                                } => {
+                                    builder.up();
+                                },
+                                KeyEvent {
+                                    key: KeyCode::DownArrow,
+                                    ..
+                                } => {
+                                    builder.down();
+                                },
+                                KeyEvent {
+                                    key: KeyCode::LeftArrow,
+                                    ..
+                                } => {
+                                    builder.left();
+                                },
+                                KeyEvent {
+                                    key: KeyCode::RightArrow,
+                                    ..
+                                } => {
+                                    builder.right();
+                                },
+                                KeyEvent {
+                                    key: KeyCode::Enter,
+                                    ..
+                                } => {
+                                    builder.enter();
+                                },
+                                KeyEvent {
+                                    key: KeyCode::Backspace,
+                                    ..
+                                } => {
+                                    builder.backspace();
+                                },
+                                KeyEvent {
+                                    key: KeyCode::Char(c),
+                                    ..
+                                } => {
+                                    builder.input(c);
+                                },
+
                                 _ => {},
                             };
-                            buf.draw_from_screen(call_field.render(builder.call(), 0), scaffold.call().column(), scaffold.call().line());
+                            buf.draw_from_screen(call_field.render(builder.call(), &builder.position()), scaffold.call().column(), scaffold.call().line());
+                            buf.draw_from_screen(details_field.render(builder.details(builder.position())), scaffold.details_panel().column(), scaffold.details_panel().line());
                         },
-                        SelectedArea::Extensions => {},
+                        SelectedArea::Extensions => {
+                            buf.draw_from_screen(extensions_field.render(builder.extensions(), &0), scaffold.extensions().column(), scaffold.extensions().line());
+                        },
                     }
                 },
                 _ => {},
