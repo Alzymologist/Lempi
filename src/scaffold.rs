@@ -52,30 +52,14 @@ impl Scaffold {
     }
 
     pub fn block(&self) -> Location {
-        Location { line: self.size.rows, column: 0, height: 1, width: self.size.cols }
-    }
-
-    pub fn author(&self) -> Location {
-        let line = 2;
-        let column = 0;
-        let width = self.vsplit() - 1;
-        let height = self.size.rows / 10;
-        Location{line, column, height, width}
+        Location { line: self.size.rows-1, column: 0, height: 1, width: self.size.cols }
     }
 
     pub fn call(&self) -> Location {
-        let line = self.size.rows / 10 + 2;
+        let line = 2;
         let column = 0;
         let width = self.vsplit() - 1;
-        let height = self.size.rows * 6 / 10;
-        Location{line, column, height, width}
-    }
-
-    pub fn extensions(&self) -> Location {
-        let line = self.size.rows * 7 / 10 + 2;
-        let column = 0;
-        let width = self.vsplit() - 1;
-        let height = self.size.rows - self.size.rows * 7 / 10 + 2;
+        let height = self.size.rows - 3;
         Location{line, column, height, width}
     }
 
@@ -83,7 +67,7 @@ impl Scaffold {
         let line = 2;
         let column = self.vsplit() + 1;
         let width = self.vsplit() - 1;
-        let height = self.size.rows - 2;
+        let height = self.size.rows - 3;
         Location{line, column, height, width}
     }
 

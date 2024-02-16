@@ -1,22 +1,26 @@
-use substrate_constructor::fill_prepare::MultiAddress;
+use substrate_parser::additional_types::AccountId32;
 
-use termwiz::color::AnsiColor;
-use termwiz::input::{InputEvent, KeyCode, KeyEvent};
-use termwiz::surface::{Change, Surface};
-
-pub struct AuthorField {
-    surface: Surface,
+pub struct Author {
+    
 }
 
-impl AuthorField {
-    pub fn new(surface: Surface) -> Self {
-        Self { surface }
+impl Author {
+    pub fn into_account_id32(&self) -> AccountId32 {
+        AccountId32([0u8; 32])
+    }
+}
+
+pub struct AddressBook {
+
+}
+
+impl AddressBook {
+    pub fn init() -> Self {
+        Self {}
     }
 
-    pub fn render(&mut self, author: &Option<MultiAddress>, _position: &usize) -> &Surface {
-        self.surface.add_change(Change::ClearScreen(AnsiColor::Black.into()));
-        self.surface.add_change(format!("Author: {:?}", author));
-        &self.surface
+    pub fn authors(&self) -> Vec<Author> {
+        vec![Author{}]
     }
 }
 
