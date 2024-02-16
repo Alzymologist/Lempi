@@ -15,25 +15,36 @@ impl Details {
     }
 
     pub fn render(&mut self, card: DetailsCard) -> &Surface {
-        self.surface.add_change(Change::ClearScreen(AnsiColor::Black.into()));
+        self.surface
+            .add_change(Change::ClearScreen(AnsiColor::Black.into()));
 
         self.surface.add_change(card.info);
         self.surface.add_change("\n\r");
         self.surface.add_change("\n\r");
         self.surface.add_change(card.content);
-       
+
         if let Some(selector) = card.selector {
             self.surface.add_change("\n\r");
             self.surface.add_change("\n\r");
             for (index, item) in selector.list.iter().enumerate() {
-                if selector.index == index {self.surface.add_change(Change::Attribute(AttributeChange::Background(AnsiColor::White.into())));}
+                if selector.index == index {
+                    self.surface
+                        .add_change(Change::Attribute(AttributeChange::Background(
+                            AnsiColor::White.into(),
+                        )));
+                }
                 self.surface.add_change(item);
                 self.surface.add_change("\n\r");
-                if selector.index == index {self.surface.add_change(Change::Attribute(AttributeChange::Background(AnsiColor::Black.into())));}
+                if selector.index == index {
+                    self.surface
+                        .add_change(Change::Attribute(AttributeChange::Background(
+                            AnsiColor::Black.into(),
+                        )));
+                }
             }
         }
 
-        if let Some(buffer) = card.buffer {    
+        if let Some(buffer) = card.buffer {
             self.surface.add_change("\n\r");
             self.surface.add_change("\n\r");
             self.surface.add_change("New value >");
@@ -43,4 +54,3 @@ impl Details {
         &self.surface
     }
 }
-

@@ -1,6 +1,5 @@
 use substrate_constructor::fill_prepare::TransactionToFill;
 
-
 use termwiz::caps::Capabilities;
 use termwiz::cell::AttributeChange;
 use termwiz::color::AnsiColor;
@@ -31,15 +30,16 @@ use scaffold::Scaffold;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-
     let address_book = AddressBook::init();
 
     let (mut block_hash_rx, mut block_rx) = chain::block_watch();
 
     let some_block = block_rx.recv().await.unwrap();
     let metadata = chain::get_metadata(&some_block).await;
+    let genesis_hash = chain::get_genesis_hash().await;
+    let specs = chain::get_specs(&some_block).await;
 
-    let mut builder = Builder::new(&metadata, &address_book);
+    let mut builder = Builder::new(&metadata, &address_book, genesis_hash, specs);
     let mut hash = String::new();
 
     let caps = Capabilities::new_from_env()?;
@@ -56,19 +56,35 @@ async fn main() -> Result<(), Error> {
     let mut header = scaffold.header().surface();
     header.add_change(Change::ClearScreen(AnsiColor::Blue.into()));
     header.add_change("=====Substrate low-fi client!=====");
-    buf.draw_from_screen(&header, scaffold.header().column(), scaffold.header().line());
+    buf.draw_from_screen(
+        &header,
+        scaffold.header().column(),
+        scaffold.header().line(),
+    );
     let mut separator = scaffold.details_separator().surface();
     separator.add_change(Change::ClearScreen(AnsiColor::Blue.into()));
-    buf.draw_from_screen(&separator, scaffold.details_separator().column(), scaffold.details_separator().line());
+    buf.draw_from_screen(
+        &separator,
+        scaffold.details_separator().column(),
+        scaffold.details_separator().line(),
+    );
     buf.flush()?;
 
     let mut block = scaffold.block().surface();
 
     let mut call_field = CallField::new(scaffold.call().surface());
-    buf.draw_from_screen(call_field.render(builder.call(), &builder.position()), scaffold.call().column(), scaffold.call().line());
-    
+    buf.draw_from_screen(
+        call_field.render(builder.call(), &builder.position()),
+        scaffold.call().column(),
+        scaffold.call().line(),
+    );
+
     let mut details_field = Details::new(scaffold.details_panel().surface());
-    buf.draw_from_screen(details_field.render(builder.details()), scaffold.details_panel().column(), scaffold.details_panel().line());
+    buf.draw_from_screen(
+        details_field.render(builder.details()),
+        scaffold.details_panel().column(),
+        scaffold.details_panel().line(),
+    );
 
     loop {
         if builder.details {
@@ -95,60 +111,68 @@ async fn main() -> Result<(), Error> {
                     buf.add_change(Change::ClearScreen(AnsiColor::Black.into()));
                     buf.flush()?;
                     break;
-                },
+                }
                 InputEvent::Paste(s) => builder.paste(s),
                 // Area-specific buttons
                 InputEvent::Key(key) => {
-                            match key {
-                                KeyEvent {
-                                    key: KeyCode::UpArrow,
-                                    ..
-                                } => {
-                                    builder.up();
-                                },
-                                KeyEvent {
-                                    key: KeyCode::DownArrow,
-                                    ..
-                                } => {
-                                    builder.down();
-                                },
-                                KeyEvent {
-                                    key: KeyCode::LeftArrow,
-                                    ..
-                                } => {
-                                    builder.left();
-                                },
-                                KeyEvent {
-                                    key: KeyCode::RightArrow,
-                                    ..
-                                } => {
-                                    builder.right();
-                                },
-                                KeyEvent {
-                                    key: KeyCode::Enter,
-                                    ..
-                                } => {
-                                    builder.enter();
-                                },
-                                KeyEvent {
-                                    key: KeyCode::Backspace,
-                                    ..
-                                } => {
-                                    builder.backspace();
-                                },
-                                KeyEvent {
-                                    key: KeyCode::Char(c),
-                                    ..
-                                } => {
-                                    builder.input(c);
-                                },
+                    match key {
+                        KeyEvent {
+                            key: KeyCode::UpArrow,
+                            ..
+                        } => {
+                            builder.up();
+                        }
+                        KeyEvent {
+                            key: KeyCode::DownArrow,
+                            ..
+                        } => {
+                            builder.down();
+                        }
+                        KeyEvent {
+                            key: KeyCode::LeftArrow,
+                            ..
+                        } => {
+                            builder.left();
+                        }
+                        KeyEvent {
+                            key: KeyCode::RightArrow,
+                            ..
+                        } => {
+                            builder.right();
+                        }
+                        KeyEvent {
+                            key: KeyCode::Enter,
+                            ..
+                        } => {
+                            builder.enter();
+                        }
+                        KeyEvent {
+                            key: KeyCode::Backspace,
+                            ..
+                        } => {
+                            builder.backspace();
+                        }
+                        KeyEvent {
+                            key: KeyCode::Char(c),
+                            ..
+                        } => {
+                            builder.input(c);
+                        }
 
-                                _ => {},
-                            };
-                            buf.draw_from_screen(call_field.render(builder.call(), &builder.position()), scaffold.call().column(), scaffold.call().line());
-                            buf.draw_from_screen(details_field.render(builder.details()), scaffold.details_panel().column(), scaffold.details_panel().line());
-                },
-                _ => {},
+                        _ => {}
+                    };
+                    buf.draw_from_screen(
+                        call_field.render(builder.call(), &builder.position()),
+                        scaffold.call().column(),
+                        scaffold.call().line(),
+                    );
+                    buf.draw_from_screen(
+                        details_field.render(builder.details()),
+                        scaffold.details_panel().column(),
+                        scaffold.details_panel().line(),
+                    );
+                }
+                _ => {}
             },
             Ok(None) => {}
             Err(e) => {

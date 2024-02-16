@@ -1,8 +1,6 @@
 use substrate_parser::additional_types::AccountId32;
 
-pub struct Author {
-    
-}
+pub struct Author {}
 
 impl Author {
     pub fn into_account_id32(&self) -> AccountId32 {
@@ -10,9 +8,7 @@ impl Author {
     }
 }
 
-pub struct AddressBook {
-
-}
+pub struct AddressBook {}
 
 impl AddressBook {
     pub fn init() -> Self {
@@ -20,7 +16,11 @@ impl AddressBook {
     }
 
     pub fn authors(&self) -> Vec<Author> {
-        vec![Author{}]
+        vec![Author {}]
     }
-}
 
+    pub fn author_names(&self) -> Vec<String> {
+        vec!["Placeholder 1".to_string(), "Placeholcer 2".to_string()]
+    }
+    
+}

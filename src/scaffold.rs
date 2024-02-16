@@ -1,5 +1,5 @@
-use termwiz::terminal::ScreenSize;
 use termwiz::surface::Surface;
+use termwiz::terminal::ScreenSize;
 
 /// This thing tells all surfaces where they belong
 ///
@@ -21,13 +21,21 @@ pub struct Location {
 }
 
 impl Location {
-    pub fn line(&self) -> usize { self.line }
+    pub fn line(&self) -> usize {
+        self.line
+    }
 
-    pub fn column(&self) -> usize { self.column }
+    pub fn column(&self) -> usize {
+        self.column
+    }
 
-    pub fn width(&self) -> usize { self.width }
+    pub fn width(&self) -> usize {
+        self.width
+    }
 
-    pub fn height(&self) -> usize { self.height }
+    pub fn height(&self) -> usize {
+        self.height
+    }
 
     pub fn surface(&self) -> Surface {
         Surface::new(self.width, self.height)
@@ -36,7 +44,7 @@ impl Location {
 
 impl Scaffold {
     pub fn new(size: ScreenSize) -> Self {
-        Self{size}
+        Self { size }
     }
 
     pub fn resize(&mut self, size: ScreenSize) {
@@ -48,11 +56,21 @@ impl Scaffold {
     }
 
     pub fn header(&self) -> Location {
-        Location { line: 0, column: 0, height: 1, width: self.size.cols }
+        Location {
+            line: 0,
+            column: 0,
+            height: 1,
+            width: self.size.cols,
+        }
     }
 
     pub fn block(&self) -> Location {
-        Location { line: self.size.rows-1, column: 0, height: 1, width: self.size.cols }
+        Location {
+            line: self.size.rows - 1,
+            column: 0,
+            height: 1,
+            width: self.size.cols,
+        }
     }
 
     pub fn call(&self) -> Location {
@@ -60,7 +78,12 @@ impl Scaffold {
         let column = 0;
         let width = self.vsplit() - 1;
         let height = self.size.rows - 3;
-        Location{line, column, height, width}
+        Location {
+            line,
+            column,
+            height,
+            width,
+        }
     }
 
     pub fn details_panel(&self) -> Location {
@@ -68,11 +91,20 @@ impl Scaffold {
         let column = self.vsplit() + 1;
         let width = self.vsplit() - 1;
         let height = self.size.rows - 3;
-        Location{line, column, height, width}
+        Location {
+            line,
+            column,
+            height,
+            width,
+        }
     }
 
     pub fn details_separator(&self) -> Location {
-        Location{line: 1, column: self.vsplit(), height: self.size.rows-2, width: 1}
+        Location {
+            line: 1,
+            column: self.vsplit(),
+            height: self.size.rows - 2,
+            width: 1,
+        }
     }
 }
-

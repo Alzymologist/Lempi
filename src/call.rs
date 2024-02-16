@@ -17,16 +17,20 @@ impl CallField {
     }
 
     pub fn render(&mut self, cards: Vec<Card>, position: &usize) -> &Surface {
-        self.surface.add_change(Change::ClearScreen(AnsiColor::Black.into()));
+        self.surface
+            .add_change(Change::ClearScreen(AnsiColor::Black.into()));
         for (depth, card) in cards.into_iter().enumerate() {
-            self.render_field(card, *position==depth)
+            self.render_field(card, *position == depth)
         }
         &self.surface
     }
 
     fn render_field(&mut self, card: Card, selected: bool) {
         if selected {
-            self.surface.add_change(Change::Attribute(AttributeChange::Background(AnsiColor::White.into())));
+            self.surface
+                .add_change(Change::Attribute(AttributeChange::Background(
+                    AnsiColor::White.into(),
+                )));
         }
         for i in 0..card.indent {
             self.surface.add_change(" | ");
@@ -34,8 +38,10 @@ impl CallField {
         self.surface.add_change(card.content);
         self.surface.add_change("\r\n");
         if selected {
-            self.surface.add_change(Change::Attribute(AttributeChange::Background(AnsiColor::Black.into())));
+            self.surface
+                .add_change(Change::Attribute(AttributeChange::Background(
+                    AnsiColor::Black.into(),
+                )));
         }
     }
 }
-
