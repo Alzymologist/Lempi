@@ -27,7 +27,7 @@ impl Details {
             self.surface.add_change("\n\r");
             self.surface.add_change("\n\r");
             for (index, item) in selector.list.iter().enumerate() {
-                if selector.index == index {
+                if selector.index() == index {
                     self.surface
                         .add_change(Change::Attribute(AttributeChange::Background(
                             AnsiColor::White.into(),
@@ -35,7 +35,7 @@ impl Details {
                 }
                 self.surface.add_change(item);
                 self.surface.add_change("\n\r");
-                if selector.index == index {
+                if selector.index() == index {
                     self.surface
                         .add_change(Change::Attribute(AttributeChange::Background(
                             AnsiColor::Black.into(),

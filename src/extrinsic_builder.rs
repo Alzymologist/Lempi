@@ -10,10 +10,33 @@ use substrate_constructor::try_fill::{TryBytesFill, TryFill};
 
 use crate::author::AddressBook;
 
-
+#[derive(Clone)]
 pub struct Selector {
     pub list: Vec<String>,
-    pub index: usize,
+    index: usize,
+}
+
+impl Selector {
+    pub fn new(list: Vec<String>, index: usize) -> Self {
+        assert!(index < list.len());
+        Self { list, index }
+    }
+
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn inc(&mut self) {
+        if self.index < self.list.len() { self.index += 1 }
+    }
+    
+    pub fn dec(&mut self) {
+        if self.index > 0 { self.index -= 1 }
+    }
+
+    pub fn selected(&self) -> String {
+        self.list[self.index].to_string()
+    }
 }
 
 pub struct Builder<'a, 'b> {
@@ -24,7 +47,7 @@ pub struct Builder<'a, 'b> {
     genesis_hash: [u8; 32],
     metadata: &'a RuntimeMetadataV14,
     position: usize,
-    selector: usize,
+    selector: Option<Selector>,
     specs: Map<String, Value>,
     transaction: TransactionToFill,
 }
@@ -45,7 +68,7 @@ impl<'a, 'b> Builder<'a, 'b> {
             genesis_hash,
             metadata,
             position: 0,
-            selector: 0,
+            selector: None,
             specs,
             transaction,
         }
@@ -66,24 +89,17 @@ impl<'a, 'b> Builder<'a, 'b> {
         } else {
             None
         };
-        let selector = if self.details {
-            Some(self.selector)
-        } else {
-            None
-        };
         DetailsCard::new(
             &self.observable_field(),
             buffer,
-            selector,
+            self.selector.clone(),
             self.address_book,
         )
     }
 
     pub fn up(&mut self) {
         if self.details {
-            if self.selector > 0 {
-                self.selector -= 1;
-            }
+            if let Some(ref mut a) = self.selector {a.dec()}
         } else {
             if self.position > 0 {
                 self.position -= 1;
@@ -93,7 +109,7 @@ impl<'a, 'b> Builder<'a, 'b> {
 
     pub fn down(&mut self) {
         if self.details {
-            self.selector += 1;
+            if let Some(ref mut a) = self.selector {a.inc()}
         } else {
             if self.position < self.call().len() - 1 {
                 self.position += 1;
@@ -127,7 +143,7 @@ impl<'a, 'b> Builder<'a, 'b> {
         if self.details {
             let buffer = self.buffer.clone();
             let types = &self.metadata.types;
-            let selector = self.selector;
+            let selector = self.selector.clone();
             match self.modifiable_field().content {
                 TypeContentToFill::ArrayU8(ref mut a) => {
                     a.upd_from_utf8(&buffer);
@@ -141,76 +157,59 @@ impl<'a, 'b> Builder<'a, 'b> {
                     a.upd_from_utf8(&buffer);
                 }
                 TypeContentToFill::Variant(ref mut a) => {
+                    if let Some(s) = selector {
                     match VariantSelector::new_at::<(), RuntimeMetadataV14>(
                         &a.available_variants,
                         &mut (),
                         types,
-                        selector,
+                        s.index,
                     ) {
                         Ok(b) => *a = b,
                         _ => (),
-                    }
+                    }}
                 }
                 _ => {}
             }
 
             self.buffer = "".to_string();
-            self.selector = 0;
+            self.selector = None;
             self.details = false;
         } else {
+            self.selector = match &self.observable_field().content {
+            TypeContentToFill::ArrayU8(a) => {
+                None
+            },
+            TypeContentToFill::SequenceU8(a) => {
+                None
+            },
+            TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(a)) => {
+                Some(Selector {list: self.address_book.author_names(), index: 0})
+            },
+            TypeContentToFill::Variant(a) => {
+                    let mut list = Vec::new();
+                    for variant in &a.available_variants {
+                        list.push(variant.name.clone());
+                    }
+                    Some(Selector { list, index: 0 })
+            },
+            _ => None,
+            };
+
             self.buffer = "".to_string();
-            self.selector = 0;
             self.details = true;
         }
     }
 
     pub fn input(&mut self, c: char) {
         self.buffer.push(c);
-        /*
-        if self.details {
-            match self.modifiable_field().content {
-                TypeContentToFill::Sequence(ref mut a) => {
-                    match a.content {
-                        SetInProgress::U8(ref mut v) => v.push(c as u8),
-                        SetInProgress::Regular(ref mut v) => (),
-                    }
-                },
-                _ => {},
-            }
-        }*/
     }
 
     pub fn backspace(&mut self) {
         let _ = self.buffer.pop();
-        /*
-        if self.details {
-            match self.modifiable_field().content {
-                TypeContentToFill::Sequence(ref mut a) => {
-                    match a.content {
-                        SetInProgress::U8(ref mut v) => {let _ = v.pop();},
-                        SetInProgress::Regular(ref mut v) => {let _ = v.pop();},
-                    }
-                },
-                _ => {},
-            }
-        }
-        */
     }
 
     pub fn paste(&mut self, s: String) {
         self.buffer.push_str(&s);
-        /*
-        if self.details {
-            match self.modifiable_field().content {
-                TypeContentToFill::Sequence(ref mut a) => {
-                    match a.content {
-                        SetInProgress::U8(ref mut v) => v.append(&mut (s.as_bytes().to_vec())),
-                        SetInProgress::Regular(ref mut v) => (),
-                    }
-                },
-                _ => {},
-            }
-        }*/
     }
 
     pub fn position(&self) -> usize {
@@ -299,7 +298,7 @@ impl DetailsCard {
     pub fn new(
         input: &TypeToFill,
         buffer: Option<String>,
-        selector_index: Option<usize>,
+        selector: Option<Selector>,
         address_book: &AddressBook,
     ) -> Self {
         let info = input
@@ -308,7 +307,6 @@ impl DetailsCard {
             .map(|a| a.docs.clone())
             .collect::<Vec<String>>()
             .join(" ~ ");
-        let mut selector = None;
         let content = match &input.content {
             TypeContentToFill::ArrayU8(a) => {
                 format!(
@@ -327,17 +325,9 @@ impl DetailsCard {
                 )
             }
             TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(a)) => {
-                selector = Some(Selector {list: address_book.author_names(), index: 0});
                 format!("{:?}", a)
             }
             TypeContentToFill::Variant(a) => {
-                if let Some(index) = selector_index {
-                    let mut list = Vec::new();
-                    for variant in &a.available_variants {
-                        list.push(variant.name.clone());
-                    }
-                    selector = Some(Selector { list, index });
-                }
                 format!(
                     "{}: {}",
                     a.selected.name,
@@ -408,6 +398,9 @@ fn steamroller(input: &TypeToFill, indent: usize) -> Vec<Card> {
                 format!("Phase: {:?} Period: {:?}", phase, period),
                 indent,
             ));
+        }
+        TypeContentToFill::SpecialType(SpecialTypeToFill::H256(a)) => {
+            output.push(Card::new(format!("{:?} H256: {:?}", a.specialty, a.hash), indent));
         }
         TypeContentToFill::Tuple(a) => {
             for i in a {

@@ -1,10 +1,24 @@
 use substrate_parser::additional_types::AccountId32;
 
-pub struct Author {}
+pub struct Author {
+//    public: H256,
+}
 
 impl Author {
+    pub fn from_public() -> Self {
+        Self{}
+    }
+
+    pub fn from_private() -> Self {
+        Self{}
+    }
+
     pub fn into_account_id32(&self) -> AccountId32 {
         AccountId32([0u8; 32])
+    }
+
+    pub fn name(&self) -> String {
+        "Pizdec".to_string()
     }
 }
 
