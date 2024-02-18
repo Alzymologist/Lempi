@@ -9,10 +9,25 @@ use primitive_types::H256;
 
 use serde_json::{value::Value, Map, Number};
 
+use smoldot_light::{Client, platform::DefaultPlatform};
+
+use std::sync::Arc;
+
 use tokio::{
     sync::{broadcast, mpsc},
     time::{sleep, Duration},
 };
+
+pub struct Blockchain {
+    client: Client<Arc<DefaultPlatform>, ()>,
+}
+
+impl Blockchain {
+    pub fn new() -> Self {
+        let client = Client::new(DefaultPlatform::new(env!("CARGO_PKG_NAME").into(), env!("CARGO_PKG_VERSION").into()));
+        Self {client}
+    }
+}
 
 const ADDRESS: &str = "wss://westend-rpc.polkadot.io";
 
