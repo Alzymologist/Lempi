@@ -1,4 +1,6 @@
-use frame_metadata::v14::RuntimeMetadataV14;
+use frame_metadata::v15::RuntimeMetadataV15;
+
+use primitive_types::H256;
 
 use serde_json::{Map, Value};
 
@@ -41,28 +43,27 @@ impl Selector {
 
 pub struct Builder<'a, 'b> {
     address_book: &'b AddressBook,
-    base58: u16,
     buffer: String,
     pub details: bool,
-    genesis_hash: [u8; 32],
-    metadata: &'a RuntimeMetadataV14,
+    genesis_hash: H256,
+    metadata: &'a RuntimeMetadataV15,
     position: usize,
     selector: Option<Selector>,
     specs: Map<String, Value>,
+    ss58: u16,
     transaction: TransactionToFill,
 }
 
 impl<'a, 'b> Builder<'a, 'b> {
-    pub fn new(metadata: &'a RuntimeMetadataV14, address_book: &'b AddressBook, genesis_hash: [u8; 32], specs: Map<String, Value>) -> Self {
-        let mut transaction = TransactionToFill::init(&mut (), metadata).unwrap();
-        let base58 = if let Some(Value::Number(a)) = specs.get("ss58Format") {
+    pub fn new(metadata: &'a RuntimeMetadataV15, address_book: &'b AddressBook, genesis_hash: H256, specs: Map<String, Value>) -> Self {
+        let mut transaction = TransactionToFill::init(&mut (), metadata, genesis_hash).unwrap();
+        let ss58 = if let Some(Value::Number(a)) = specs.get("ss58Format") {
             if let Some(b) = a.as_u64() {
                 b as u16
             } else {42}
         } else {42};
         Self {
             address_book,
-            base58,
             buffer: "".to_owned(),
             details: false,
             genesis_hash,
@@ -70,6 +71,7 @@ impl<'a, 'b> Builder<'a, 'b> {
             position: 0,
             selector: None,
             specs,
+            ss58,
             transaction,
         }
     }
@@ -122,7 +124,7 @@ impl<'a, 'b> Builder<'a, 'b> {
         match self.modifiable_field().content {
             TypeContentToFill::SpecialType(SpecialTypeToFill::Era(ref mut a)) => a.selector(),
             TypeContentToFill::Variant(ref mut a) => a
-                .selector_up::<(), RuntimeMetadataV14>(&mut (), types)
+                .selector_up::<(), RuntimeMetadataV15>(&mut (), types)
                 .unwrap(),
             _ => (),
         };
@@ -133,7 +135,7 @@ impl<'a, 'b> Builder<'a, 'b> {
         match self.modifiable_field().content {
             TypeContentToFill::SpecialType(SpecialTypeToFill::Era(ref mut a)) => a.selector(),
             TypeContentToFill::Variant(ref mut a) => a
-                .selector_down::<(), RuntimeMetadataV14>(&mut (), types)
+                .selector_down::<(), RuntimeMetadataV15>(&mut (), types)
                 .unwrap(),
             _ => (),
         };
@@ -144,6 +146,7 @@ impl<'a, 'b> Builder<'a, 'b> {
             let buffer = self.buffer.clone();
             let types = &self.metadata.types;
             let selector = self.selector.clone();
+            let address_book = self.address_book;
             match self.modifiable_field().content {
                 TypeContentToFill::ArrayU8(ref mut a) => {
                     a.upd_from_utf8(&buffer);
@@ -156,9 +159,14 @@ impl<'a, 'b> Builder<'a, 'b> {
                 TypeContentToFill::SequenceU8(ref mut a) => {
                     a.upd_from_utf8(&buffer);
                 }
+                TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(ref mut a)) => {
+                    if let Some(s) = selector {
+                        *a =  address_book.account_id32(s.index)
+                    }
+                }
                 TypeContentToFill::Variant(ref mut a) => {
                     if let Some(s) = selector {
-                    match VariantSelector::new_at::<(), RuntimeMetadataV14>(
+                    match VariantSelector::new_at::<(), RuntimeMetadataV15>(
                         &a.available_variants,
                         &mut (),
                         types,
@@ -183,7 +191,7 @@ impl<'a, 'b> Builder<'a, 'b> {
                 None
             },
             TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(a)) => {
-                Some(Selector {list: self.address_book.author_names(), index: 0})
+                Some(Selector {list: self.address_book.author_names(self.ss58), index: 0})
             },
             TypeContentToFill::Variant(a) => {
                     let mut list = Vec::new();
@@ -268,9 +276,9 @@ impl<'a, 'b> Builder<'a, 'b> {
         panic!("diver reached bottom of pool, rip");
     }
 
-    pub fn autofill(&mut self) {
+    pub fn autofill(&mut self, block: H256) {
         // TODO
-
+        self.transaction.populate_block_hash(self.genesis_hash, block);
     }
 }
 

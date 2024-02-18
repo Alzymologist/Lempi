@@ -35,12 +35,12 @@ async fn main() -> Result<(), Error> {
     let (mut block_hash_rx, mut block_rx) = chain::block_watch();
 
     let some_block = block_rx.recv().await.unwrap();
-    let metadata = chain::get_metadata(&some_block).await;
+    let metadata = chain::get_metadata(some_block).await;
     let genesis_hash = chain::get_genesis_hash().await;
-    let specs = chain::get_specs(&some_block).await;
+    let specs = chain::get_specs(some_block).await;
 
     let mut builder = Builder::new(&metadata, &address_book, genesis_hash, specs);
-    let mut hash = String::new();
+    let mut hash = some_block;
 
     let caps = Capabilities::new_from_env()?;
 
@@ -161,6 +161,7 @@ async fn main() -> Result<(), Error> {
 
                         _ => {}
                     };
+                    builder.autofill(hash);
                     buf.draw_from_screen(
                         call_field.render(builder.call(), &builder.position()),
                         scaffold.call().column(),

@@ -1,9 +1,11 @@
-use frame_metadata::{v14::RuntimeMetadataV14, RuntimeMetadata};
+use frame_metadata::{v15::RuntimeMetadataV15, RuntimeMetadata};
 
 use jsonrpsee::core::client::ClientT;
 use jsonrpsee::{rpc_params, server::Server, ws_client::WsClientBuilder, RpcModule};
 
 use parity_scale_codec::Decode;
+
+use primitive_types::H256;
 
 use serde_json::{value::Value, Map, Number};
 
@@ -11,6 +13,8 @@ use tokio::{
     sync::{broadcast, mpsc},
     time::{sleep, Duration},
 };
+
+const ADDRESS: &str = "wss://westend-rpc.polkadot.io";
 
 /// Local errors
 #[derive(Debug)]
@@ -46,42 +50,48 @@ where
     return None;
 }
 
-pub async fn get_metadata(hash: &str) -> RuntimeMetadataV14 {
+pub async fn get_metadata(hash: H256) -> RuntimeMetadataV15 {
     let client = match WsClientBuilder::default()
-        .build("wss://node-shave.zymologia.fi:443".to_string())
+        .build(ADDRESS.to_string())//wss://node-shave.zymologia.fi:443".to_string())
         .await
     {
         Ok(a) => a,
         Err(e) => panic!("ws client builder crashed"),
     };
 
+    let metadata: Value = client.request("state_call", rpc_params!["Metadata_metadata_at_version", "0f000000"]).await.unwrap();
+
+    /* V14 legacy
     let metadata: Value = match client
-        .request("state_getMetadata", rpc_params![&hash])
+        .request("state_getMetadata", rpc_params![hex::encode(hash.0)])
         .await
     {
         Ok(a) => a,
         Err(e) => panic!("{:?}", e),
     };
+    */
 
-    let metadata_v14 = if let Value::String(hex_meta) = metadata {
-        let meta = unhex(&hex_meta).unwrap();
+    let metadata_v15 = if let Value::String(hex_meta) = metadata {
+        let b = unhex(&hex_meta).unwrap();
+        let a = Option::<Vec<u8>>::decode(&mut &b[..]).unwrap();
+        let meta = a.unwrap();
         if !meta.starts_with(&[109, 101, 116, 97]) {
             panic!("Rpc response error: metadata prefix 'meta' not found");
         };
         match RuntimeMetadata::decode(&mut &meta[4..]) {
-            Ok(RuntimeMetadata::V14(out)) => out,
-            Ok(_) => panic!("Only metadata V14 is supported"),
+            Ok(RuntimeMetadata::V15(out)) => out,
+            Ok(_) => panic!("Only metadata V15 is supported"),
             Err(_) => panic!("Metadata could not be decoded"),
         }
     } else {
         panic!("wtf")
     };
-    metadata_v14
+    metadata_v15
 }
 
-pub async fn get_genesis_hash() -> [u8; 32] {
+pub async fn get_genesis_hash() -> H256 {
     let client = match WsClientBuilder::default()
-        .build("wss://node-shave.zymologia.fi:443".to_string())
+        .build(ADDRESS.to_string())
         .await
     {
         Ok(a) => a,
@@ -95,15 +105,15 @@ pub async fn get_genesis_hash() -> [u8; 32] {
         }
     };
     if let Value::String(a) = genesis_hash_data {
-        unhex(&a).unwrap().try_into().unwrap()
+        H256(unhex(&a).unwrap().try_into().unwrap())
     } else {
         panic!("block fetch failed")
     }
 }
 
-pub async fn get_specs(hash: &str) -> Map<String, Value> {
+pub async fn get_specs(hash: H256) -> Map<String, Value> {
     let client = match WsClientBuilder::default()
-        .build("wss://node-shave.zymologia.fi:443".to_string())
+        .build(ADDRESS.to_string())
         .await
     {
         Ok(a) => a,
@@ -111,7 +121,7 @@ pub async fn get_specs(hash: &str) -> Map<String, Value> {
     };
 
     match client
-        .request("system_properties", rpc_params![&hash])
+        .request("system_properties", rpc_params![hex::encode(hash.0)])
         .await
     {
         Ok(a) => a,
@@ -122,13 +132,13 @@ pub async fn get_specs(hash: &str) -> Map<String, Value> {
 }
 
 
-pub fn block_watch() -> (broadcast::Receiver<String>, broadcast::Receiver<String>) {
+pub fn block_watch() -> (broadcast::Receiver<H256>, broadcast::Receiver<H256>) {
     let (block_tx, mut block_rx) = broadcast::channel(1);
     let mut block_rx2 = block_tx.subscribe();
 
     tokio::spawn(async move {
         let client = match WsClientBuilder::default()
-            .build("wss://node-shave.zymologia.fi:443".to_string())
+            .build(ADDRESS.to_string())
             .await
         {
             Ok(a) => a,
@@ -147,7 +157,7 @@ pub fn block_watch() -> (broadcast::Receiver<String>, broadcast::Receiver<String
             } else {
                 panic!("block fetch failed")
             };
-            block_tx.send(block_hash).unwrap();
+            block_tx.send(H256(unhex(&block_hash).unwrap().try_into().unwrap())).unwrap();
             sleep(Duration::new(10, 0)).await;
         }
     });

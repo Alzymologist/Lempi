@@ -1096,6 +1096,7 @@ dependencies = [
  "hex",
  "jsonrpsee",
  "parity-scale-codec",
+ "primitive-types",
  "serde",
  "serde_json",
  "substrate-constructor",
@@ -2120,7 +2121,7 @@ checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 [[package]]
 name = "substrate-constructor"
 version = "0.1.0"
-source = "git+https://github.com/Alzymologist/substrate-constructor#a0b091a3df601ac9dd9671a72bb8bd54cb3ac234"
+source = "git+https://github.com/Alzymologist/substrate-constructor#56d372322a1b276cc06c3d546594e5b468baa50c"
 dependencies = [
  "bitvec",
  "external-memory-tools",
