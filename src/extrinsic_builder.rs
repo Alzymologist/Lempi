@@ -4,6 +4,8 @@ use primitive_types::H256;
 
 use serde_json::{Map, Value};
 
+use std::str::FromStr;
+
 use substrate_constructor::fill_prepare::{
     EraToFill, PrimitiveToFill, SpecialTypeToFill, TransactionToFill, TypeContentToFill,
     TypeToFill, VariantSelector,
@@ -122,6 +124,7 @@ impl<'a, 'b> Builder<'a, 'b> {
     pub fn left(&mut self) {
         let types = &self.metadata.types;
         match self.modifiable_field().content {
+            TypeContentToFill::SequenceRegular(ref mut a) => a.remove_last_element(),
             TypeContentToFill::SpecialType(SpecialTypeToFill::Era(ref mut a)) => a.selector(),
             TypeContentToFill::Variant(ref mut a) => a
                 .selector_up::<(), RuntimeMetadataV15>(&mut (), types)
@@ -133,6 +136,7 @@ impl<'a, 'b> Builder<'a, 'b> {
     pub fn right(&mut self) {
         let types = &self.metadata.types;
         match self.modifiable_field().content {
+            TypeContentToFill::SequenceRegular(ref mut a) => a.add_new_element::<(), RuntimeMetadataV15>(&mut (), types).unwrap(),
             TypeContentToFill::SpecialType(SpecialTypeToFill::Era(ref mut a)) => a.selector(),
             TypeContentToFill::Variant(ref mut a) => a
                 .selector_down::<(), RuntimeMetadataV15>(&mut (), types)
@@ -156,6 +160,7 @@ impl<'a, 'b> Builder<'a, 'b> {
                     PrimitiveToFill::Regular(ref mut b) => b.upd_from_str(&buffer),
                     PrimitiveToFill::Unsigned(ref mut b) => b.content.upd_from_str(&buffer),
                 },
+            TypeContentToFill::SequenceRegular(ref mut a) => if let Ok(number) = usize::from_str(&buffer) { a.set_number_of_elements::<(), RuntimeMetadataV15>(&mut (), types, number).unwrap() },
                 TypeContentToFill::SequenceU8(ref mut a) => {
                     a.upd_from_utf8(&buffer);
                 }

@@ -17,9 +17,26 @@ impl CallField {
     }
 
     pub fn render(&mut self, cards: Vec<Card>, position: &usize) -> &Surface {
+        let mut midscreen = 0;
+        let mut cursor_seen = false;
+        let (_, ysize) = self.surface.dimensions();
+        let midscreen_threshold = ysize-15;
+
         self.surface
             .add_change(Change::ClearScreen(AnsiColor::Black.into()));
         for (depth, card) in cards.into_iter().enumerate() {
+            if *position == depth {
+                    cursor_seen = true;
+        }
+                if cursor_seen {
+                    let (_, current) = self.surface.cursor_position();
+                    if current - midscreen > midscreen_threshold {
+                        self.surface.add_change(" + + + ( more )\n\r");
+                        break
+                    }
+                } else {
+                    (_, midscreen) = self.surface.cursor_position();
+                }
             self.render_field(card, *position == depth)
         }
         &self.surface

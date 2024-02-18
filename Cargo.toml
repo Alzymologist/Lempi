@@ -13,7 +13,7 @@ parity-scale-codec = {version = "3.6.5", features = ["derive"]}
 primitive-types = "0.12.2"
 serde = { version = "1.0.188", features = ["derive"] }
 serde_json = "1.0.106"
-smoldot-light = "0.15.0"
+smoldot-light = { version = "0.15.0", default-features = false, features = ["std"] }
 sp-core = "29.0.0"
 substrate-constructor = { git = "https://github.com/Alzymologist/substrate-constructor" }
 substrate_parser = "0.6.0"
