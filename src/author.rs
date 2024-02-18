@@ -1,20 +1,33 @@
 use primitive_types::H256;
 
+use sp_core::{Pair, sr25519};
+
 use substrate_parser::additional_types::AccountId32;
 
-pub struct Address {
-    public: H256,
+#[derive(Debug)]
+pub enum Error {
+    DerivationFailed(String),
+}
+
+pub enum Address {
+    Public(H256),
+    Pair(sr25519::Pair),
 }
 
 impl Address {
     pub fn from_public(public: H256) -> Self {
-        Self{
-            public,
-        }
+        Self::Public(public)
     }
 
     pub fn from_public_hex(public: &str) -> Self {
         Self::from_public(H256(hex::decode(public).unwrap().try_into().unwrap()))
+    }
+
+    pub fn from_derivation(full_address: &str) -> Result<Self, Error> {
+        match sr25519::Pair::from_string(full_address, None) {
+            Ok(a) => Ok(Self::Pair(a)),
+            Err(e) => Err(Error::DerivationFailed(e.to_string())),
+        }
     }
 
     /*
@@ -24,11 +37,17 @@ impl Address {
     */
 
     fn own_symbol(&self) -> String {
-        "+".to_string()
+        match self {
+            Address::Public(_) => "-".to_string(),
+            Address::Pair(_) => "+".to_string(),
+        }
     }
 
     pub fn public(&self) -> H256 {
-        self.public
+        match self {
+            Address::Public(a) => *a,
+            Address::Pair(a) => a.public().into(),
+        }
     }
 
     pub fn into_account_id32(&self) -> AccountId32 {
@@ -38,22 +57,35 @@ impl Address {
     pub fn name(&self, ss58: u16) -> String {
         format!("[{}] {}", self.own_symbol(), self.into_account_id32().as_base58(ss58).to_string())
     }
+
+    pub fn sign(&self, input: &[u8]) -> Option<sr25519::Signature> {
+        match self {
+            Address::Public(_) => None,
+            Address::Pair(a) => Some(a.sign(input)),
+        }
+    }
 }
 
 pub struct AddressBook {
-    content: Vec<Address>
+    content: Vec<Address>,
+    ss58: u16,
 }
 
 impl AddressBook {
-    pub fn init() -> Self {
+    pub fn init(ss58: u16) -> Self {
         let mut content = Vec::new();
         // Debuggers built-in addresses
+        content.push(Address::from_derivation("").unwrap());
         content.push(Address::from_public_hex("be5ddb1579b72e84524fc29e78609e3caf42e85aa118ebfe0b0ad404b5bdd25f"));
+        content.push(Address::from_derivation("//Alice").unwrap());
         content.push(Address::from_public_hex("fe65717dad0447d715f660a0a58411de509b42e6efb8375f562f58a554d5860e"));
-        content.push(Address::from_public_hex("90b5ab205c6974c9ea841be688864633dc9ca8a357843eeacf2314649965fe22"));
+        content.push(Address::from_derivation("//Bob").unwrap());
+        content.push(Address::from_derivation("//Charlie").unwrap());
         content.push(Address::from_public_hex("306721211d5404bd9da88e0204360a1a9ab8b87c66c1bc2fcdd37f3c2222cc20"));
+        content.push(Address::from_derivation("//Fred").unwrap());
         Self {
-            content
+            content,
+            ss58,
         }
     }
 
@@ -61,8 +93,8 @@ impl AddressBook {
         &self.content
     }
 
-    pub fn author_names(&self, ss58: u16) -> Vec<String> {
-        self.authors().iter().map(|a| format!("{}", a.name(ss58))).collect()
+    pub fn author_names(&self) -> Vec<String> {
+        self.authors().iter().map(|a| format!("{}", a.name(self.ss58))).collect()
     }
     
     pub fn public(&self, index: usize) -> Option<H256> {
@@ -79,3 +111,4 @@ impl AddressBook {
         }
     }
 }
+

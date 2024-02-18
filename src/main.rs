@@ -1,3 +1,5 @@
+use serde_json::Value;
+
 use substrate_constructor::fill_prepare::TransactionToFill;
 
 use termwiz::caps::Capabilities;
@@ -30,7 +32,6 @@ use scaffold::Scaffold;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let address_book = AddressBook::init();
 
     let (mut block_hash_rx, mut block_rx) = chain::block_watch();
 
@@ -38,6 +39,13 @@ async fn main() -> Result<(), Error> {
     let metadata = chain::get_metadata(some_block).await;
     let genesis_hash = chain::get_genesis_hash().await;
     let specs = chain::get_specs(some_block).await;
+    let ss58 = if let Some(Value::Number(a)) = specs.get("ss58Format") {
+            if let Some(b) = a.as_u64() {
+                b as u16
+            } else {42}
+        } else {42};
+
+    let address_book = AddressBook::init(ss58);
 
     let mut builder = Builder::new(&metadata, &address_book, genesis_hash, specs);
     let mut hash = some_block;

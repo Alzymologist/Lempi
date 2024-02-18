@@ -191,7 +191,7 @@ impl<'a, 'b> Builder<'a, 'b> {
                 None
             },
             TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(a)) => {
-                Some(Selector {list: self.address_book.author_names(self.ss58), index: 0})
+                Some(Selector {list: self.address_book.author_names(), index: 0})
             },
             TypeContentToFill::Variant(a) => {
                     let mut list = Vec::new();
@@ -411,7 +411,7 @@ fn steamroller_inside(input: &TypeContentToFill, indent: usize) -> Vec<Card> {
             output.push(Card::new("AccountId32".to_string(), indent));
         }
         TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(Some(a))) => {
-            output.push(Card::new(a.as_base58(42), indent)); // TODO
+            output.push(Card::new(format!("address: {}", a.as_base58(42)), indent)); // TODO
         }
 
         TypeContentToFill::SpecialType(SpecialTypeToFill::Era(EraToFill::Immortal)) => {
