@@ -29,7 +29,7 @@ impl Selector {
     }
 
     pub fn inc(&mut self) {
-        if self.index < self.list.len() { self.index += 1 }
+        if self.index < self.list.len()-1 { self.index += 1 }
     }
     
     pub fn dec(&mut self) {
@@ -92,7 +92,7 @@ impl<'a, 'b> Builder<'a, 'b> {
             None
         };
         DetailsCard::new(
-            &self.observable_field(),
+            self.observable_field(),
             buffer,
             self.selector.clone(),
             self.address_book,
@@ -224,7 +224,7 @@ impl<'a, 'b> Builder<'a, 'b> {
         self.position
     }
 
-    fn observable_field(&self) -> &TypeToFill {
+    fn observable_field(&self) -> RefTypeToFill {
         let mut position = self.position;
         match peek(&self.transaction.author, position) {
             Peeker::Done(a) => return a,
@@ -250,7 +250,7 @@ impl<'a, 'b> Builder<'a, 'b> {
         panic!("diver reached bottom of pool, rip");
     }
 
-    fn modifiable_field(&mut self) -> &mut TypeToFill {
+    fn modifiable_field(&mut self) -> RefMutTypeToFill {
         let mut position = self.position;
         match peek(&self.transaction.author, position) {
             Peeker::Done(_) => return dive_hard(&mut self.transaction.author, position),
@@ -304,17 +304,19 @@ pub struct DetailsCard {
 
 impl DetailsCard {
     pub fn new(
-        input: &TypeToFill,
+        input: RefTypeToFill,
         buffer: Option<String>,
         selector: Option<Selector>,
         address_book: &AddressBook,
     ) -> Self {
         let info = input
-            .info
+            .info;
+            /*
             .iter()
             .map(|a| a.docs.clone())
             .collect::<Vec<String>>()
             .join(" ~ ");
+            */
         let content = match &input.content {
             TypeContentToFill::ArrayU8(a) => {
                 format!(
@@ -324,7 +326,9 @@ impl DetailsCard {
                     a.len
                 )
             }
-
+            TypeContentToFill::SequenceRegular(a) => {
+                format!("Sequence of length {}:", a.content.len())
+            }
             TypeContentToFill::SequenceU8(a) => {
                 format!(
                     "Value: {}\r\n\r\nString: {}",
@@ -360,10 +364,19 @@ impl DetailsCard {
 ///
 /// Either way, if this crashes, no biggie
 fn steamroller(input: &TypeToFill, indent: usize) -> Vec<Card> {
+    steamroller_inside(&input.content, indent)
+}
+
+fn steamroller_inside(input: &TypeContentToFill, indent: usize) -> Vec<Card> {
     let mut output = Vec::new();
-    match &input.content {
+    match &input {
         TypeContentToFill::ArrayU8(a) => {
             output.push(Card::new(format!("0x{}", hex::encode(&a.content)), indent));
+        }
+        TypeContentToFill::ArrayRegular(a) => {
+            for i in &a.content {
+                output.append(&mut steamroller_inside(&i, indent));
+            }
         }
         TypeContentToFill::Composite(a) => {
             for i in a {
@@ -387,6 +400,12 @@ fn steamroller(input: &TypeToFill, indent: usize) -> Vec<Card> {
         }
         TypeContentToFill::SequenceU8(a) => {
             output.push(Card::new(format!("0x{}", hex::encode(&a.content)), indent));
+        }
+        TypeContentToFill::SequenceRegular(a) => {
+            output.push(Card::new(format!("Sequence of length {}:", a.content.len()), indent));
+            for i in &a.content {
+                output.append(&mut steamroller_inside(&i, indent+1));
+            }
         }
         TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(None)) => {
             output.push(Card::new("AccountId32".to_string(), indent));
@@ -432,13 +451,44 @@ fn steamroller(input: &TypeToFill, indent: usize) -> Vec<Card> {
 
 enum Peeker<'a> {
     Depth(usize),
-    Done(&'a TypeToFill),
+    Done(RefTypeToFill<'a>),
+}
+
+impl <'a> Peeker<'a> {
+    fn done(content: &'a TypeContentToFill, info: &str) -> Self {
+        let info = info.to_string();
+        Self::Done(RefTypeToFill{info, content})
+    }
+}
+
+struct RefTypeToFill<'a> {
+    info: String,
+    content: &'a TypeContentToFill,
 }
 
 /// Extract type at given depth
 fn peek<'a>(input: &'a TypeToFill, position: usize) -> Peeker<'a> {
+    peek_inside(
+        &input.content,
+        &input.info
+            .iter()
+            .map(|a| a.docs.clone())
+            .collect::<Vec<String>>()
+            .join(" ~ "),
+         position)
+}
+
+fn peek_inside<'a>(input: &'a TypeContentToFill, info: &str, position: usize) -> Peeker<'a> {
     let mut depth = position;
-    match input.content {
+    match input {
+        TypeContentToFill::ArrayRegular(a) => {
+            for i in &a.content {
+                match peek_inside(i, info, depth) {
+                    Peeker::Depth(a) => depth = a,
+                    Peeker::Done(a) => return Peeker::Done(a),
+                }
+            }
+        }
         TypeContentToFill::Composite(ref a) => {
             for i in a {
                 match peek(&i.type_to_fill, depth) {
@@ -446,6 +496,19 @@ fn peek<'a>(input: &'a TypeToFill, position: usize) -> Peeker<'a> {
                     Peeker::Done(a) => return Peeker::Done(a),
                 }
             }
+        }
+        TypeContentToFill::SequenceRegular(ref a) => {
+            if position == 0 {
+                return Peeker::done(input, info);
+            }
+            depth -= 1;
+            for i in &a.content {
+                match peek_inside(i, info, depth) {
+                    Peeker::Depth(a) => depth = a,
+                    Peeker::Done(a) => return Peeker::Done(a),
+                }
+            }
+
         }
         TypeContentToFill::Tuple(ref a) => {
             for i in a {
@@ -457,7 +520,7 @@ fn peek<'a>(input: &'a TypeToFill, position: usize) -> Peeker<'a> {
         }
         TypeContentToFill::Variant(ref a) => {
             if position == 0 {
-                return Peeker::Done(input);
+                return Peeker::done(input, info);
             }
             depth -= 1;
             for i in &a.selected.fields_to_fill {
@@ -470,7 +533,7 @@ fn peek<'a>(input: &'a TypeToFill, position: usize) -> Peeker<'a> {
         TypeContentToFill::VariantEmpty => {}
         _ => {
             if position == 0 {
-                return Peeker::Done(input);
+                return Peeker::done(input, info);
             }
             depth -= 1;
         }
@@ -481,34 +544,80 @@ fn peek<'a>(input: &'a TypeToFill, position: usize) -> Peeker<'a> {
 
 enum Diver<'a> {
     Depth(usize),
-    Done(&'a mut TypeToFill),
+    Done(RefMutTypeToFill<'a>),
+}
+
+impl <'a> Diver<'a> {
+    fn done(content: &'a mut TypeContentToFill, info: &str) -> Self {
+        let info = info.to_string();
+        Self::Done(RefMutTypeToFill{info, content})
+    }
+}
+
+struct RefMutTypeToFill<'a> {
+    info: String,
+    content: &'a mut TypeContentToFill,
 }
 
 /// Extract type at given depth
 fn dive<'a>(input: &'a mut TypeToFill, position: usize) -> Diver<'a> {
+    dive_inside(
+        &mut input.content,
+        &input.info
+            .iter()
+            .map(|a| a.docs.clone())
+            .collect::<Vec<String>>()
+            .join(" ~ "),
+         position)
+}
+
+fn dive_inside<'a>(input: &'a mut TypeContentToFill, info: &str, position: usize) -> Diver<'a> {
     let mut depth = position;
 
     //Pass twice because of ref mut limitations
-    match input.content {
+    match input {
+        TypeContentToFill::ArrayRegular(_) => {}
         TypeContentToFill::Composite(_) => {}
+        TypeContentToFill::SequenceRegular(_) => {
+            if position == 0 {
+                return Diver::done(input, info);
+            }
+        }
         TypeContentToFill::Tuple(_) => {}
         TypeContentToFill::Variant(_) => {
             if position == 0 {
-                return Diver::Done(input);
+                return Diver::done(input, info);
             }
         }
         TypeContentToFill::VariantEmpty => {}
         _ => {
             if position == 0 {
-                return Diver::Done(input);
+                return Diver::done(input, info);
             };
         }
     };
 
-    match input.content {
+    match input {
+        TypeContentToFill::ArrayRegular(ref mut a) => {
+            for i in &mut a.content {
+                match dive_inside(i, info, depth) {
+                    Diver::Depth(a) => depth = a,
+                    Diver::Done(a) => return Diver::Done(a),
+                }
+            }
+        }
         TypeContentToFill::Composite(ref mut a) => {
             for i in a {
                 match dive(&mut i.type_to_fill, depth) {
+                    Diver::Depth(a) => depth = a,
+                    Diver::Done(a) => return Diver::Done(a),
+                }
+            }
+        }
+        TypeContentToFill::SequenceRegular(ref mut a) => {
+            depth -= 1;
+            for i in &mut a.content {
+                match dive_inside(i, info, depth) {
                     Diver::Depth(a) => depth = a,
                     Diver::Done(a) => return Diver::Done(a),
                 }
@@ -540,7 +649,7 @@ fn dive<'a>(input: &'a mut TypeToFill, position: usize) -> Diver<'a> {
     Diver::Depth(depth)
 }
 
-fn dive_hard<'a>(input: &'a mut TypeToFill, position: usize) -> &mut TypeToFill {
+fn dive_hard<'a>(input: &'a mut TypeToFill, position: usize) -> RefMutTypeToFill {
     match dive(input, position) {
         Diver::Done(a) => a,
         _ => panic!("diver reached bottom of the pool!"),
