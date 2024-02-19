@@ -18,7 +18,7 @@ impl Details {
         let mut midscreen = 0;
         let mut cursor_seen = false;
         let (_, ysize) = self.surface.dimensions();
-        let midscreen_threshold = ysize-15;
+        let midscreen_threshold = ysize/2;
 
         self.surface
             .add_change(Change::ClearScreen(AnsiColor::Black.into()));
@@ -33,13 +33,11 @@ impl Details {
             self.surface.add_change("\n\r");
             for (index, item) in selector.list.iter().enumerate() {
                 if cursor_seen {
-                    let (_, current) = self.surface.cursor_position();
-                    if current - midscreen > midscreen_threshold {
+                    midscreen += 1;
+                    if midscreen > midscreen_threshold {
                         self.surface.add_change(" + + + ( more )\n\r");
-                        break
+                        break;
                     }
-                } else {
-                    (_, midscreen) = self.surface.cursor_position();
                 }
                 if selector.index() == index {
                     cursor_seen = true;

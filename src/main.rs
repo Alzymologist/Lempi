@@ -32,6 +32,7 @@ use scaffold::Scaffold;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+    let bc = chain::Blockchain::new();
 
     let (mut block_hash_rx, mut block_rx) = chain::block_watch();
 
@@ -40,10 +41,14 @@ async fn main() -> Result<(), Error> {
     let genesis_hash = chain::get_genesis_hash().await;
     let specs = chain::get_specs(some_block).await;
     let ss58 = if let Some(Value::Number(a)) = specs.get("ss58Format") {
-            if let Some(b) = a.as_u64() {
-                b as u16
-            } else {42}
-        } else {42};
+        if let Some(b) = a.as_u64() {
+            b as u16
+        } else {
+            42
+        }
+    } else {
+        42
+    };
 
     let address_book = AddressBook::init(ss58);
 

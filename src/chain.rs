@@ -9,9 +9,9 @@ use primitive_types::H256;
 
 use serde_json::{value::Value, Map, Number};
 
-use smoldot_light::{Client, platform::DefaultPlatform};
+use smoldot_light::{AddChainConfig, platform::DefaultPlatform, Client};
 
-use std::sync::Arc;
+use std::{iter, sync::Arc};
 
 use tokio::{
     sync::{broadcast, mpsc},
@@ -24,8 +24,19 @@ pub struct Blockchain {
 
 impl Blockchain {
     pub fn new() -> Self {
-        let client = Client::new(DefaultPlatform::new(env!("CARGO_PKG_NAME").into(), env!("CARGO_PKG_VERSION").into()));
-        Self {client}
+        let mut client = Client::new(DefaultPlatform::new(
+            env!("CARGO_PKG_NAME").into(),
+            env!("CARGO_PKG_VERSION").into(),
+        ));
+        let chain_config = AddChainConfig {
+            user_data: (),
+            specification: include_str!("../chain-specs/westend.json"),
+            database_content: "",
+            potential_relay_chains: iter::empty(),
+            json_rpc: smoldot_light::AddChainConfigJsonRpc::Disabled,
+        };
+        client.add_chain(chain_config);
+        Self { client }
     }
 }
 
@@ -67,14 +78,20 @@ where
 
 pub async fn get_metadata(hash: H256) -> RuntimeMetadataV15 {
     let client = match WsClientBuilder::default()
-        .build(ADDRESS.to_string())//wss://node-shave.zymologia.fi:443".to_string())
+        .build(ADDRESS.to_string()) //wss://node-shave.zymologia.fi:443".to_string())
         .await
     {
         Ok(a) => a,
         Err(e) => panic!("ws client builder crashed"),
     };
 
-    let metadata: Value = client.request("state_call", rpc_params!["Metadata_metadata_at_version", "0f000000"]).await.unwrap();
+    let metadata: Value = client
+        .request(
+            "state_call",
+            rpc_params!["Metadata_metadata_at_version", "0f000000"],
+        )
+        .await
+        .unwrap();
 
     /* V14 legacy
     let metadata: Value = match client
@@ -105,10 +122,7 @@ pub async fn get_metadata(hash: H256) -> RuntimeMetadataV15 {
 }
 
 pub async fn get_genesis_hash() -> H256 {
-    let client = match WsClientBuilder::default()
-        .build(ADDRESS.to_string())
-        .await
-    {
+    let client = match WsClientBuilder::default().build(ADDRESS.to_string()).await {
         Ok(a) => a,
         Err(e) => panic!("ws client builder crashed"),
     };
@@ -127,10 +141,7 @@ pub async fn get_genesis_hash() -> H256 {
 }
 
 pub async fn get_specs(hash: H256) -> Map<String, Value> {
-    let client = match WsClientBuilder::default()
-        .build(ADDRESS.to_string())
-        .await
-    {
+    let client = match WsClientBuilder::default().build(ADDRESS.to_string()).await {
         Ok(a) => a,
         Err(e) => panic!("ws client builder crashed"),
     };
@@ -142,20 +153,14 @@ pub async fn get_specs(hash: H256) -> Map<String, Value> {
         Ok(a) => a,
         Err(e) => panic!("{:?}", e),
     }
-
-
 }
-
 
 pub fn block_watch() -> (broadcast::Receiver<H256>, broadcast::Receiver<H256>) {
     let (block_tx, mut block_rx) = broadcast::channel(1);
     let mut block_rx2 = block_tx.subscribe();
 
     tokio::spawn(async move {
-        let client = match WsClientBuilder::default()
-            .build(ADDRESS.to_string())
-            .await
-        {
+        let client = match WsClientBuilder::default().build(ADDRESS.to_string()).await {
             Ok(a) => a,
             Err(e) => panic!("ws client builder crashed"),
         };
@@ -172,7 +177,9 @@ pub fn block_watch() -> (broadcast::Receiver<H256>, broadcast::Receiver<H256>) {
             } else {
                 panic!("block fetch failed")
             };
-            block_tx.send(H256(unhex(&block_hash).unwrap().try_into().unwrap())).unwrap();
+            block_tx
+                .send(H256(unhex(&block_hash).unwrap().try_into().unwrap()))
+                .unwrap();
             sleep(Duration::new(10, 0)).await;
         }
     });

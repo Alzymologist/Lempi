@@ -31,11 +31,15 @@ impl Selector {
     }
 
     pub fn inc(&mut self) {
-        if self.index < self.list.len()-1 { self.index += 1 }
+        if self.index < self.list.len() - 1 {
+            self.index += 1
+        }
     }
-    
+
     pub fn dec(&mut self) {
-        if self.index > 0 { self.index -= 1 }
+        if self.index > 0 {
+            self.index -= 1
+        }
     }
 
     pub fn selected(&self) -> String {
@@ -57,13 +61,22 @@ pub struct Builder<'a, 'b> {
 }
 
 impl<'a, 'b> Builder<'a, 'b> {
-    pub fn new(metadata: &'a RuntimeMetadataV15, address_book: &'b AddressBook, genesis_hash: H256, specs: Map<String, Value>) -> Self {
+    pub fn new(
+        metadata: &'a RuntimeMetadataV15,
+        address_book: &'b AddressBook,
+        genesis_hash: H256,
+        specs: Map<String, Value>,
+    ) -> Self {
         let mut transaction = TransactionToFill::init(&mut (), metadata, genesis_hash).unwrap();
         let ss58 = if let Some(Value::Number(a)) = specs.get("ss58Format") {
             if let Some(b) = a.as_u64() {
                 b as u16
-            } else {42}
-        } else {42};
+            } else {
+                42
+            }
+        } else {
+            42
+        };
         Self {
             address_book,
             buffer: "".to_owned(),
@@ -103,7 +116,9 @@ impl<'a, 'b> Builder<'a, 'b> {
 
     pub fn up(&mut self) {
         if self.details {
-            if let Some(ref mut a) = self.selector {a.dec()}
+            if let Some(ref mut a) = self.selector {
+                a.dec()
+            }
         } else {
             if self.position > 0 {
                 self.position -= 1;
@@ -113,7 +128,9 @@ impl<'a, 'b> Builder<'a, 'b> {
 
     pub fn down(&mut self) {
         if self.details {
-            if let Some(ref mut a) = self.selector {a.inc()}
+            if let Some(ref mut a) = self.selector {
+                a.inc()
+            }
         } else {
             if self.position < self.call().len() - 1 {
                 self.position += 1;
@@ -136,7 +153,9 @@ impl<'a, 'b> Builder<'a, 'b> {
     pub fn right(&mut self) {
         let types = &self.metadata.types;
         match self.modifiable_field().content {
-            TypeContentToFill::SequenceRegular(ref mut a) => a.add_new_element::<(), RuntimeMetadataV15>(&mut (), types).unwrap(),
+            TypeContentToFill::SequenceRegular(ref mut a) => a
+                .add_new_element::<(), RuntimeMetadataV15>(&mut (), types)
+                .unwrap(),
             TypeContentToFill::SpecialType(SpecialTypeToFill::Era(ref mut a)) => a.selector(),
             TypeContentToFill::Variant(ref mut a) => a
                 .selector_down::<(), RuntimeMetadataV15>(&mut (), types)
@@ -160,26 +179,32 @@ impl<'a, 'b> Builder<'a, 'b> {
                     PrimitiveToFill::Regular(ref mut b) => b.upd_from_str(&buffer),
                     PrimitiveToFill::Unsigned(ref mut b) => b.content.upd_from_str(&buffer),
                 },
-            TypeContentToFill::SequenceRegular(ref mut a) => if let Ok(number) = usize::from_str(&buffer) { a.set_number_of_elements::<(), RuntimeMetadataV15>(&mut (), types, number).unwrap() },
+                TypeContentToFill::SequenceRegular(ref mut a) => {
+                    if let Ok(number) = usize::from_str(&buffer) {
+                        a.set_number_of_elements::<(), RuntimeMetadataV15>(&mut (), types, number)
+                            .unwrap()
+                    }
+                }
                 TypeContentToFill::SequenceU8(ref mut a) => {
                     a.upd_from_utf8(&buffer);
                 }
                 TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(ref mut a)) => {
                     if let Some(s) = selector {
-                        *a =  address_book.account_id32(s.index)
+                        *a = address_book.account_id32(s.index)
                     }
                 }
                 TypeContentToFill::Variant(ref mut a) => {
                     if let Some(s) = selector {
-                    match VariantSelector::new_at::<(), RuntimeMetadataV15>(
-                        &a.available_variants,
-                        &mut (),
-                        types,
-                        s.index,
-                    ) {
-                        Ok(b) => *a = b,
-                        _ => (),
-                    }}
+                        match VariantSelector::new_at::<(), RuntimeMetadataV15>(
+                            &a.available_variants,
+                            &mut (),
+                            types,
+                            s.index,
+                        ) {
+                            Ok(b) => *a = b,
+                            _ => (),
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -189,23 +214,22 @@ impl<'a, 'b> Builder<'a, 'b> {
             self.details = false;
         } else {
             self.selector = match &self.observable_field().content {
-            TypeContentToFill::ArrayU8(a) => {
-                None
-            },
-            TypeContentToFill::SequenceU8(a) => {
-                None
-            },
-            TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(a)) => {
-                Some(Selector {list: self.address_book.author_names(), index: 0})
-            },
-            TypeContentToFill::Variant(a) => {
+                TypeContentToFill::ArrayU8(a) => None,
+                TypeContentToFill::SequenceU8(a) => None,
+                TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(a)) => {
+                    Some(Selector {
+                        list: self.address_book.author_names(),
+                        index: 0,
+                    })
+                }
+                TypeContentToFill::Variant(a) => {
                     let mut list = Vec::new();
                     for variant in &a.available_variants {
                         list.push(variant.name.clone());
                     }
                     Some(Selector { list, index: 0 })
-            },
-            _ => None,
+                }
+                _ => None,
             };
 
             self.buffer = "".to_string();
@@ -283,7 +307,8 @@ impl<'a, 'b> Builder<'a, 'b> {
 
     pub fn autofill(&mut self, block: H256) {
         // TODO
-        self.transaction.populate_block_hash(self.genesis_hash, block);
+        self.transaction
+            .populate_block_hash(self.genesis_hash, block);
     }
 }
 
@@ -299,7 +324,6 @@ impl Card {
     }
 }
 
-
 pub struct DetailsCard {
     pub content: String,
     pub info: String,
@@ -314,14 +338,13 @@ impl DetailsCard {
         selector: Option<Selector>,
         address_book: &AddressBook,
     ) -> Self {
-        let info = input
-            .info;
-            /*
-            .iter()
-            .map(|a| a.docs.clone())
-            .collect::<Vec<String>>()
-            .join(" ~ ");
-            */
+        let info = input.info;
+        /*
+        .iter()
+        .map(|a| a.docs.clone())
+        .collect::<Vec<String>>()
+        .join(" ~ ");
+        */
         let content = match &input.content {
             TypeContentToFill::ArrayU8(a) => {
                 format!(
@@ -407,16 +430,20 @@ fn steamroller_inside(input: &TypeContentToFill, indent: usize) -> Vec<Card> {
             output.push(Card::new(format!("0x{}", hex::encode(&a.content)), indent));
         }
         TypeContentToFill::SequenceRegular(a) => {
-            output.push(Card::new(format!("Sequence of length {}:", a.content.len()), indent));
+            output.push(Card::new(
+                format!("Sequence of length {}:", a.content.len()),
+                indent,
+            ));
             for i in &a.content {
-                output.append(&mut steamroller_inside(&i, indent+1));
+                output.append(&mut steamroller_inside(&i, indent + 1));
             }
         }
         TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(None)) => {
             output.push(Card::new("AccountId32".to_string(), indent));
         }
         TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(Some(a))) => {
-            output.push(Card::new(format!("address: {}", a.as_base58(42)), indent)); // TODO
+            output.push(Card::new(format!("address: {}", a.as_base58(42)), indent));
+            // TODO
         }
 
         TypeContentToFill::SpecialType(SpecialTypeToFill::Era(EraToFill::Immortal)) => {
@@ -432,7 +459,10 @@ fn steamroller_inside(input: &TypeContentToFill, indent: usize) -> Vec<Card> {
             ));
         }
         TypeContentToFill::SpecialType(SpecialTypeToFill::H256(a)) => {
-            output.push(Card::new(format!("{:?} H256: {:?}", a.specialty, a.hash), indent));
+            output.push(Card::new(
+                format!("{:?} H256: {:?}", a.specialty, a.hash),
+                indent,
+            ));
         }
         TypeContentToFill::Tuple(a) => {
             for i in a {
@@ -459,10 +489,10 @@ enum Peeker<'a> {
     Done(RefTypeToFill<'a>),
 }
 
-impl <'a> Peeker<'a> {
+impl<'a> Peeker<'a> {
     fn done(content: &'a TypeContentToFill, info: &str) -> Self {
         let info = info.to_string();
-        Self::Done(RefTypeToFill{info, content})
+        Self::Done(RefTypeToFill { info, content })
     }
 }
 
@@ -475,12 +505,14 @@ struct RefTypeToFill<'a> {
 fn peek<'a>(input: &'a TypeToFill, position: usize) -> Peeker<'a> {
     peek_inside(
         &input.content,
-        &input.info
+        &input
+            .info
             .iter()
             .map(|a| a.docs.clone())
             .collect::<Vec<String>>()
             .join(" ~ "),
-         position)
+        position,
+    )
 }
 
 fn peek_inside<'a>(input: &'a TypeContentToFill, info: &str, position: usize) -> Peeker<'a> {
@@ -513,7 +545,6 @@ fn peek_inside<'a>(input: &'a TypeContentToFill, info: &str, position: usize) ->
                     Peeker::Done(a) => return Peeker::Done(a),
                 }
             }
-
         }
         TypeContentToFill::Tuple(ref a) => {
             for i in a {
@@ -552,10 +583,10 @@ enum Diver<'a> {
     Done(RefMutTypeToFill<'a>),
 }
 
-impl <'a> Diver<'a> {
+impl<'a> Diver<'a> {
     fn done(content: &'a mut TypeContentToFill, info: &str) -> Self {
         let info = info.to_string();
-        Self::Done(RefMutTypeToFill{info, content})
+        Self::Done(RefMutTypeToFill { info, content })
     }
 }
 
@@ -568,12 +599,14 @@ struct RefMutTypeToFill<'a> {
 fn dive<'a>(input: &'a mut TypeToFill, position: usize) -> Diver<'a> {
     dive_inside(
         &mut input.content,
-        &input.info
+        &input
+            .info
             .iter()
             .map(|a| a.docs.clone())
             .collect::<Vec<String>>()
             .join(" ~ "),
-         position)
+        position,
+    )
 }
 
 fn dive_inside<'a>(input: &'a mut TypeContentToFill, info: &str, position: usize) -> Diver<'a> {

@@ -20,22 +20,20 @@ impl CallField {
         let mut midscreen = 0;
         let mut cursor_seen = false;
         let (_, ysize) = self.surface.dimensions();
-        let midscreen_threshold = ysize-15;
+        let midscreen_threshold = ysize/2;
 
         self.surface
             .add_change(Change::ClearScreen(AnsiColor::Black.into()));
         for (depth, card) in cards.into_iter().enumerate() {
             if *position == depth {
-                    cursor_seen = true;
-        }
-                if cursor_seen {
-                    let (_, current) = self.surface.cursor_position();
-                    if current - midscreen > midscreen_threshold {
+                cursor_seen = true;
+            }
+            if cursor_seen {
+                    midscreen += 1;
+                    if midscreen > midscreen_threshold {
                         self.surface.add_change(" + + + ( more )\n\r");
-                        break
+                        break;
                     }
-                } else {
-                    (_, midscreen) = self.surface.cursor_position();
                 }
             self.render_field(card, *position == depth)
         }
