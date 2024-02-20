@@ -32,14 +32,11 @@ use scaffold::Scaffold;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let bc = chain::Blockchain::new();
+    let bc = chain::Blockchain::new().await;
 
-    let (mut block_hash_rx, mut block_rx) = chain::block_watch();
-
-    let some_block = block_rx.recv().await.unwrap();
-    let metadata = chain::get_metadata(some_block).await;
-    let genesis_hash = chain::get_genesis_hash().await;
-    let specs = chain::get_specs(some_block).await;
+    let metadata = bc.metadata();
+    let genesis_hash = bc.genesis_hash();
+    let specs = bc.specs();
     let ss58 = if let Some(Value::Number(a)) = specs.get("ss58Format") {
         if let Some(b) = a.as_u64() {
             b as u16
@@ -52,8 +49,8 @@ async fn main() -> Result<(), Error> {
 
     let address_book = AddressBook::init(ss58);
 
-    let mut builder = Builder::new(&metadata, &address_book, genesis_hash, specs);
-    let mut hash = some_block;
+    let mut builder = Builder::new(metadata, &address_book, genesis_hash, specs);
+    let mut hash = bc.block();
 
     let caps = Capabilities::new_from_env()?;
 
@@ -105,12 +102,14 @@ async fn main() -> Result<(), Error> {
         } else {
             buf.add_change(Change::CursorVisibility(CursorVisibility::Hidden));
         }
+        /*
         if let Some(a) = chain::plop(&mut block_rx) {
             hash = a;
             block.add_change(Change::ClearScreen(AnsiColor::Grey.into()));
             block.add_change(format!("Last block: {}", &hash));
             buf.draw_from_screen(&block, scaffold.block().column(), scaffold.block().line());
         }
+        */
 
         buf.flush()?;
 

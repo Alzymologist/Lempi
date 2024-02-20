@@ -1,15 +1,23 @@
 use frame_metadata::{v15::RuntimeMetadataV15, RuntimeMetadata};
 
-use jsonrpsee::core::client::ClientT;
+use jsonrpsee::core::{
+    client::{BatchResponse, ClientT},
+    params::BatchRequestBuilder,
+    traits::ToRpcParams,
+};
+use jsonrpsee::types::{request::Request, Params};
 use jsonrpsee::{rpc_params, server::Server, ws_client::WsClientBuilder, RpcModule};
 
 use parity_scale_codec::Decode;
 
 use primitive_types::H256;
 
+use serde::Deserialize;
 use serde_json::{value::Value, Map, Number};
 
-use smoldot_light::{AddChainConfig, AddChainSuccess, ChainId, platform::DefaultPlatform, Client, JsonRpcResponses};
+use smoldot_light::{
+    platform::DefaultPlatform, AddChainConfig, AddChainSuccess, ChainId, Client, JsonRpcResponses,
+};
 
 use std::{iter, num::NonZeroU32, sync::Arc};
 
@@ -18,18 +26,51 @@ use tokio::{
     time::{sleep, Duration},
 };
 
+/*
+struct SmoldotClient {
+
+}
+
+impl ClientT for SmoldotClient {
+    /// Send a [notification request](https://www.jsonrpc.org/specification#notification)
+    async fn notification<Params>(&self, method: &str, params: Params) -> Result<(), Error>
+        where
+            Params: ToRpcParams + Send,
+        {
+            let params = params.to_rpc_params()?;
+        }
+
+    /// Send a [method call request](https://www.jsonrpc.org/specification#request_object).
+    async fn request<R, Params>(&self, method: &str, params: Params) -> Result<Value, Error> {
+        }
+
+    /// Send a [batch request](https://www.jsonrpc.org/specification#batch).
+    ///
+    /// The response to batch are returned in the same order as it was inserted in the batch.
+    ///
+    ///
+    /// Returns `Ok` if all requests in the batch were answered.
+    /// Returns `Error` if the network failed or any of the responses could be parsed a valid JSON-RPC response.
+    async fn batch_request<'a, R>(&self, batch: BatchRequestBuilder<'a>) -> Result<BatchResponse<'a, Value>, Error> {
+        }
+}
+*/
+
 /// Abstraction to connect to chain
 ///
 /// This should run asynchronously under the hood and provide easy synchronous observables
 pub struct Blockchain {
+    block_hash: H256,
     client: Client<Arc<DefaultPlatform>, ()>,
+    genesis_hash: H256,
     id: ChainId,
     responses: JsonRpcResponses<Arc<DefaultPlatform>>,
-    //metadata: RuntimeMetadataV15,
+    metadata: RuntimeMetadataV15,
+    specs: Map<String, Value>
 }
 
 impl Blockchain {
-    pub fn new() -> Self {
+    pub async fn new() -> Self {
         let mut client = Client::new(DefaultPlatform::new(
             env!("CARGO_PKG_NAME").into(),
             env!("CARGO_PKG_VERSION").into(),
@@ -44,17 +85,144 @@ impl Blockchain {
                 max_subscriptions: u32::max_value(),
             },
         };
-        let AddChainSuccess { chain_id: id, json_rpc_responses: responses } = client.add_chain(chain_config).unwrap();
-        let responses = responses.unwrap();
+        let AddChainSuccess {
+            chain_id: id,
+            json_rpc_responses: responses,
+        } = client.add_chain(chain_config).unwrap();
+        let mut responses = responses.unwrap();
 
-        
+        //let (request_id_tx, mut request_id_rx) = tokyo::
 
-        Self { client, id, responses } 
+        /*
+        tokio::spawn(async move {
+            let requests = Vec::new();
+
+            //process received requests
+
+        });*/
+
+        client
+            .json_rpc_request(
+                json_request(
+                    1,
+                    "state_call",
+                    r#""Metadata_metadata_at_version", "0x0f000000""#,
+                ),
+                id,
+            )
+            .unwrap();
+
+        let metadata: JsonResponse =
+            serde_json::from_str(&responses.next().await.unwrap()).unwrap();
+
+        let metadata = if let Value::String(hex_meta) = metadata.result {
+            let b = unhex(&hex_meta).unwrap();
+            let a = Option::<Vec<u8>>::decode(&mut &b[..]).unwrap();
+            let meta = a.unwrap();
+            if !meta.starts_with(&[109, 101, 116, 97]) {
+                panic!("Rpc response error: metadata prefix 'meta' not found");
+            };
+            match RuntimeMetadata::decode(&mut &meta[4..]) {
+                Ok(RuntimeMetadata::V15(out)) => out,
+                Ok(_) => panic!("Only metadata V15 is supported"),
+                Err(_) => panic!("Metadata could not be decoded"),
+            }
+        } else {
+            panic!("wtf")
+        };
+
+        let req = json_request(
+                    1,
+                    "chain_getBlockHash",
+                    r#"0"#,
+                );
+        println!("{}", req);
+        client
+            .json_rpc_request(
+                req,
+                id,
+            )
+            .unwrap();
+
+        let res = &responses.next().await.unwrap();
+        println!("{}", res);
+        let genesis_hash: JsonResponse =
+            serde_json::from_str(res).unwrap();
+
+        let genesis_hash = if let Value::String(a) = genesis_hash.result {
+            H256(unhex(&a).unwrap().try_into().unwrap())
+        } else {
+            panic!("block fetch failed")
+        };
+
+        client
+            .json_rpc_request(json_request(1, "chain_getBlockHash", ""), id)
+            .unwrap();
+
+        let block_hash: JsonResponse =
+            serde_json::from_str(&responses.next().await.unwrap()).unwrap();
+
+        let block_hash = if let Value::String(a) = block_hash.result {
+            H256(unhex(&a).unwrap().try_into().unwrap())
+        } else {
+            panic!("block fetch failed")
+        };
+
+        let req = json_request(1, "system_properties", "");//&format!("\"0x{}\"", hex::encode(block_hash.0)));
+        println!("{}", req);
+        client
+            .json_rpc_request(req, id)
+            .unwrap();
+
+        let specs: Value =
+            serde_json::from_str(&responses.next().await.unwrap()).unwrap();
+
+        let specs = match &specs["result"] {
+            Value::Object(a) => a.clone(),
+            _ => panic!("specs is not a map: {:?}", specs),
+        };
+
+        client
+            .json_rpc_request(json_request(1, "chain_getBlockHash", ""), id)
+            .unwrap();
+
+        let res = &responses.next().await.unwrap();
+        println!("{}", res);
+        let block_hash: JsonResponse =
+            serde_json::from_str(res).unwrap();
+
+        let block_hash = if let Value::String(a) = block_hash.result {
+            H256(unhex(&a).unwrap().try_into().unwrap())
+        } else {
+            panic!("block fetch failed")
+        };
+
+        Self {
+            block_hash,
+            client,
+            genesis_hash,
+            id,
+            responses,
+            metadata,
+            specs,
+        }
     }
-/*
-    pub fn get_metadata() -> RuntimeMeradataV15 {
-        self.metadata
-    }*/
+
+    pub fn metadata(&self) -> &RuntimeMetadataV15 {
+        &self.metadata
+    }
+
+    pub fn genesis_hash(&self) -> H256 {
+        self.genesis_hash
+    }
+
+    pub fn block(&self) -> H256 {
+        self.block_hash
+    }
+
+    pub fn specs(&self) -> Map<String, Value> {
+        self.specs.clone()
+    }
 }
 
 const ADDRESS: &str = "wss://westend-rpc.polkadot.io";
@@ -64,6 +232,23 @@ const ADDRESS: &str = "wss://westend-rpc.polkadot.io";
 enum Error {
     ChainCommunicationFailed,
     InvalidHex(String),
+}
+
+/// Generate JSON request from strings. Yes, like this. This is not dumber than imitating RPC
+/// server inside app, so shut up. This works better and faster anyway.
+fn json_request(index: u32, method: &str, params: &str) -> String {
+    let part1 = r#"{"id":"#.to_owned();
+    let part2 = r#","jsonrpc":"2.0","method":""#;
+    let part3 = r#"","params":["#;
+    let part4 = r#"]}"#;
+
+    part1 + &format!("{}", index) + part2 + method + part3 + params + part4
+}
+
+#[derive(Deserialize)]
+struct JsonResponse {
+    id: usize,
+    result: Value,
 }
 
 /// Strip "0x" prefix from input and parse it into numbers
@@ -93,6 +278,7 @@ where
     return None;
 }
 
+/*
 pub async fn get_metadata(hash: H256) -> RuntimeMetadataV15 {
     let client = match WsClientBuilder::default()
         .build(ADDRESS.to_string()) //wss://node-shave.zymologia.fi:443".to_string())
@@ -202,3 +388,4 @@ pub fn block_watch() -> (broadcast::Receiver<H256>, broadcast::Receiver<H256>) {
     });
     (block_rx, block_rx2)
 }
+*/
