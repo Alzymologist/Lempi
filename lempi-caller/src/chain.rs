@@ -136,7 +136,6 @@ impl Blockchain {
                     "chain_getBlockHash",
                     r#"0"#,
                 );
-        println!("{}", req);
         client
             .json_rpc_request(
                 req,
@@ -145,7 +144,6 @@ impl Blockchain {
             .unwrap();
 
         let res = &responses.next().await.unwrap();
-        println!("{}", res);
         let genesis_hash: JsonResponse =
             serde_json::from_str(res).unwrap();
 
@@ -169,7 +167,6 @@ impl Blockchain {
         };
 
         let req = json_request(1, "system_properties", "");//&format!("\"0x{}\"", hex::encode(block_hash.0)));
-        println!("{}", req);
         client
             .json_rpc_request(req, id)
             .unwrap();
@@ -187,7 +184,6 @@ impl Blockchain {
             .unwrap();
 
         let res = &responses.next().await.unwrap();
-        println!("{}", res);
         let block_hash: JsonResponse =
             serde_json::from_str(res).unwrap();
 
