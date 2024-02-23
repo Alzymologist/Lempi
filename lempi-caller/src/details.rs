@@ -18,7 +18,7 @@ impl Details {
         let mut midscreen = 0;
         let mut cursor_seen = false;
         let (_, ysize) = self.surface.dimensions();
-        let midscreen_threshold = ysize/2;
+        let midscreen_threshold = ysize / 2;
 
         self.surface
             .add_change(Change::ClearScreen(AnsiColor::Black.into()));

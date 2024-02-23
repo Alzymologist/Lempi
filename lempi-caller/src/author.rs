@@ -79,7 +79,11 @@ impl AddressBook {
     pub fn init(ss58: u16) -> Self {
         let mut content = Vec::new();
         // Debuggers built-in addresses
+        content.push(Address::from_derivation("//Kampela").unwrap());
+        content.push(Address::from_derivation("//westend//Kampela").unwrap());
         content.push(Address::from_derivation("").unwrap());
+        content.push(Address::from_derivation("//polkadot").unwrap());
+        content.push(Address::from_derivation("//polkadot//Alice").unwrap());
         content.push(Address::from_public_hex(
             "be5ddb1579b72e84524fc29e78609e3caf42e85aa118ebfe0b0ad404b5bdd25f",
         ));

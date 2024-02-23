@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde_json::Value;
 
 use substrate_constructor::fill_prepare::TransactionToFill;
@@ -32,9 +34,11 @@ use scaffold::Scaffold;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let bc = chain::Blockchain::new().await;
+    let mut bc = chain::Blockchain::new().await;
 
-    let metadata = bc.metadata();
+    // TODO: this should be a reference and builder should die and be reborn
+    // if this changes
+    let metadata = bc.metadata().clone();
     let genesis_hash = bc.genesis_hash();
     let specs = bc.specs();
     let ss58 = if let Some(Value::Number(a)) = specs.get("ss58Format") {
@@ -49,7 +53,7 @@ async fn main() -> Result<(), Error> {
 
     let address_book = AddressBook::init(ss58);
 
-    let mut builder = Builder::new(metadata, &address_book, genesis_hash, specs);
+    let mut builder = Builder::new(&metadata, &address_book, genesis_hash, specs);
     let mut hash = bc.block();
 
     let caps = Capabilities::new_from_env()?;
@@ -96,24 +100,50 @@ async fn main() -> Result<(), Error> {
         scaffold.details_panel().line(),
     );
 
+    let mut log_field = scaffold.logger().surface();
+
     loop {
-        if builder.details {
-            buf.add_change(Change::CursorVisibility(CursorVisibility::Visible));
+        log_field.add_change(builder.log());
+        log_field.add_change(bc.log());
+        buf.draw_from_screen(
+            &log_field,
+            scaffold.logger().column(),
+            scaffold.logger().line(),
+        );
+
+        //        if builder.details {
+        //            buf.add_change(Change::CursorVisibility(CursorVisibility::Visible));
+        //        } else {
+        buf.add_change(Change::CursorVisibility(CursorVisibility::Hidden));
+        //        }
+
+        let updated = bc.crank();
+        let nonce = if let Some(a) = builder.author() {
+            bc.nonce(a, builder.ss58)
         } else {
-            buf.add_change(Change::CursorVisibility(CursorVisibility::Hidden));
-        }
-        /*
-        if let Some(a) = chain::plop(&mut block_rx) {
-            hash = a;
+            None
+        };
+        if updated {
+            builder.autofill(hash, nonce);
+            buf.draw_from_screen(
+                call_field.render(builder.call(), &builder.position()),
+                scaffold.call().column(),
+                scaffold.call().line(),
+            );
+            buf.draw_from_screen(
+                details_field.render(builder.details()),
+                scaffold.details_panel().column(),
+                scaffold.details_panel().line(),
+            );
+            hash = bc.block();
             block.add_change(Change::ClearScreen(AnsiColor::Grey.into()));
             block.add_change(format!("Last block: {}", &hash));
             buf.draw_from_screen(&block, scaffold.block().column(), scaffold.block().line());
         }
-        */
 
         buf.flush()?;
 
-        match buf.terminal().poll_input(None) {
+        match buf.terminal().poll_input(Some(Duration::new(1, 0))) {
             Ok(Some(input)) => match input {
                 // Important global buttons that do not care what is selected
                 InputEvent::Key(KeyEvent {
@@ -165,6 +195,13 @@ async fn main() -> Result<(), Error> {
                             builder.backspace();
                         }
                         KeyEvent {
+                            key: KeyCode::Tab, ..
+                        } => {
+                            if let Some(a) = builder.submittable_signed() {
+                                bc.send(&a);
+                            }
+                        }
+                        KeyEvent {
                             key: KeyCode::Char(c),
                             ..
                         } => {
@@ -173,7 +210,6 @@ async fn main() -> Result<(), Error> {
 
                         _ => {}
                     };
-                    builder.autofill(hash);
                     buf.draw_from_screen(
                         call_field.render(builder.call(), &builder.position()),
                         scaffold.call().column(),

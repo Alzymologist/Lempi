@@ -10,7 +10,10 @@ use substrate_constructor::fill_prepare::{
     EraToFill, PrimitiveToFill, SpecialTypeToFill, TransactionToFill, TypeContentToFill,
     TypeToFill, VariantSelector,
 };
+use substrate_constructor::finalize::Finalize;
 use substrate_constructor::try_fill::{TryBytesFill, TryFill};
+
+use substrate_parser::additional_types::SignatureSr25519;
 
 use crate::author::AddressBook;
 
@@ -56,8 +59,9 @@ pub struct Builder<'a, 'b> {
     position: usize,
     selector: Option<Selector>,
     specs: Map<String, Value>,
-    ss58: u16,
+    pub ss58: u16,
     transaction: TransactionToFill,
+    log: Vec<String>,
 }
 
 impl<'a, 'b> Builder<'a, 'b> {
@@ -88,16 +92,26 @@ impl<'a, 'b> Builder<'a, 'b> {
             specs,
             ss58,
             transaction,
+            log: Vec::new(),
         }
     }
 
     pub fn call(&self) -> Vec<Card> {
-        let mut output = steamroller(&self.transaction.author, 0);
-        output.append(&mut steamroller(&self.transaction.call, 0));
+        let mut output = steamroller(&self.transaction.author, 0, self.ss58);
+        output.append(&mut steamroller(&self.transaction.call, 0, self.ss58));
         for extension in &self.transaction.extensions {
-            output.append(&mut steamroller(&extension, 0));
+            output.append(&mut steamroller(&extension, 0, self.ss58));
         }
+        output.append(&mut steamroller(&self.transaction.signature, 0, self.ss58));
         output
+    }
+
+    pub fn author(&self) -> Option<H256> {
+        if let Some(a) = self.transaction.author_as_sr25519_compatible() {
+            Some(H256::from(a))
+        } else {
+            None
+        }
     }
 
     pub fn details(&self) -> DetailsCard {
@@ -170,6 +184,17 @@ impl<'a, 'b> Builder<'a, 'b> {
             let types = &self.metadata.types;
             let selector = self.selector.clone();
             let address_book = self.address_book;
+            let author = self.author();
+            let signable = self.signable().clone();
+            /* This shows blob that would be signed in log
+            match self.observable_field().content {
+                TypeContentToFill::SpecialType(SpecialTypeToFill::SignatureSr25519(_)) => {
+            if let Some(a) = &signable {
+                self.log.push(format!("got signable: {:?}", hex::encode(a)));
+            }},
+            _ => (),
+            }
+            */
             match self.modifiable_field().content {
                 TypeContentToFill::ArrayU8(ref mut a) => {
                     a.upd_from_utf8(&buffer);
@@ -193,6 +218,21 @@ impl<'a, 'b> Builder<'a, 'b> {
                         *a = address_book.account_id32(s.index)
                     }
                 }
+                TypeContentToFill::SpecialType(SpecialTypeToFill::SignatureSr25519(ref mut a)) => {
+                    if let Some(s) = author {
+                        if let Some(pos) =
+                            address_book.authors().iter().position(|a| a.public() == s)
+                        {
+                            if let Some(signable) = signable {
+                                if let Some(signature) = address_book.authors()[pos].sign(&signable)
+                                {
+                                    *a = Some(SignatureSr25519(signature.0));
+                                }
+                            }
+                        }
+                    }
+                }
+
                 TypeContentToFill::Variant(ref mut a) => {
                     if let Some(s) = selector {
                         match VariantSelector::new_at::<(), RuntimeMetadataV15>(
@@ -253,6 +293,16 @@ impl<'a, 'b> Builder<'a, 'b> {
         self.position
     }
 
+    pub fn signable(&mut self) -> Option<Vec<u8>> {
+        self.transaction.sign_this()
+    }
+
+    pub fn submittable_signed(&self) -> Option<Vec<u8>> {
+        self.transaction
+            .send_this_signed::<(), RuntimeMetadataV15>(self.metadata)
+            .unwrap()
+    }
+
     fn observable_field(&self) -> RefTypeToFill {
         let mut position = self.position;
         match peek(&self.transaction.author, position) {
@@ -269,6 +319,12 @@ impl<'a, 'b> Builder<'a, 'b> {
                                 Peeker::Depth(c) => {
                                     position = c;
                                 }
+                            }
+                        }
+                        match peek(&self.transaction.signature, position) {
+                            Peeker::Done(a) => return a,
+                            Peeker::Depth(d) => {
+                                panic!("diver reached bottom of pool {}, rip", d);
                             }
                         }
                     }
@@ -297,18 +353,37 @@ impl<'a, 'b> Builder<'a, 'b> {
                                 }
                             }
                         }
+                        match peek(&self.transaction.signature, position) {
+                            Peeker::Done(_) => {
+                                return dive_hard(&mut self.transaction.signature, position)
+                            }
+                            Peeker::Depth(d) => {
+                                panic!("diver reached bottom of pool {}, rip", d);
+                            }
+                        }
                     }
                 }
             }
         }
-
-        panic!("diver reached bottom of pool, rip");
+        panic!("Transaction seems to be empty");
     }
 
-    pub fn autofill(&mut self, block: H256) {
+    pub fn autofill(&mut self, block: H256, nonce: Option<u64>) {
         // TODO
-        self.transaction
-            .populate_block_hash(self.genesis_hash, block);
+        self.transaction.populate_block_hash(block);
+        if let Some(a) = nonce {
+            self.transaction.populate_nonce(a)
+        };
+    }
+
+    pub fn log(&mut self) -> String {
+        let mut out = String::new();
+        while let Some(a) = self.log.pop() {
+            out += "builder: ";
+            out += &a;
+            out += "\r\n";
+        }
+        out
     }
 }
 
@@ -391,11 +466,11 @@ impl DetailsCard {
 /// in metadata or its parser?
 ///
 /// Either way, if this crashes, no biggie
-fn steamroller(input: &TypeToFill, indent: usize) -> Vec<Card> {
-    steamroller_inside(&input.content, indent)
+fn steamroller(input: &TypeToFill, indent: usize, ss58: u16) -> Vec<Card> {
+    steamroller_inside(&input.content, indent, ss58)
 }
 
-fn steamroller_inside(input: &TypeContentToFill, indent: usize) -> Vec<Card> {
+fn steamroller_inside(input: &TypeContentToFill, indent: usize, ss58: u16) -> Vec<Card> {
     let mut output = Vec::new();
     match &input {
         TypeContentToFill::ArrayU8(a) => {
@@ -403,12 +478,12 @@ fn steamroller_inside(input: &TypeContentToFill, indent: usize) -> Vec<Card> {
         }
         TypeContentToFill::ArrayRegular(a) => {
             for i in &a.content {
-                output.append(&mut steamroller_inside(&i, indent));
+                output.append(&mut steamroller_inside(&i, indent, ss58));
             }
         }
         TypeContentToFill::Composite(a) => {
             for i in a {
-                output.append(&mut steamroller(&i.type_to_fill, indent));
+                output.append(&mut steamroller(&i.type_to_fill, indent, ss58));
             }
         }
         TypeContentToFill::Primitive(PrimitiveToFill::CompactUnsigned(a)) => {
@@ -435,14 +510,14 @@ fn steamroller_inside(input: &TypeContentToFill, indent: usize) -> Vec<Card> {
                 indent,
             ));
             for i in &a.content {
-                output.append(&mut steamroller_inside(&i, indent + 1));
+                output.append(&mut steamroller_inside(&i, indent + 1, ss58));
             }
         }
         TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(None)) => {
             output.push(Card::new("AccountId32".to_string(), indent));
         }
         TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(Some(a))) => {
-            output.push(Card::new(format!("address: {}", a.as_base58(42)), indent));
+            output.push(Card::new(format!("address: {}", a.as_base58(ss58)), indent));
             // TODO
         }
 
@@ -458,21 +533,27 @@ fn steamroller_inside(input: &TypeContentToFill, indent: usize) -> Vec<Card> {
                 indent,
             ));
         }
-        TypeContentToFill::SpecialType(SpecialTypeToFill::H256(a)) => {
+        TypeContentToFill::SpecialType(SpecialTypeToFill::H256 { hash, specialty }) => {
             output.push(Card::new(
-                format!("{:?} H256: {:?}", a.specialty, a.hash),
+                format!("{:?} H256: {:?}", specialty, hash),
                 indent,
             ));
         }
+        TypeContentToFill::SpecialType(SpecialTypeToFill::SignatureSr25519(None)) => {
+            output.push(Card::new(format!(">>>Sign here!<<<"), indent));
+        }
+        TypeContentToFill::SpecialType(SpecialTypeToFill::SignatureSr25519(Some(a))) => {
+            output.push(Card::new(format!("Signed: {}", hex::encode(&a.0)), indent));
+        }
         TypeContentToFill::Tuple(a) => {
             for i in a {
-                output.append(&mut steamroller(&i, indent));
+                output.append(&mut steamroller(&i, indent, ss58));
             }
         }
         TypeContentToFill::Variant(a) => {
             output.push(Card::new(a.selected.name.clone(), indent));
             for i in &a.selected.fields_to_fill {
-                output.append(&mut steamroller(&i.type_to_fill, indent + 1));
+                output.append(&mut steamroller(&i.type_to_fill, indent + 1, ss58));
             }
         }
         TypeContentToFill::VariantEmpty => {}

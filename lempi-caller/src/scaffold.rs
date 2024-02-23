@@ -55,6 +55,10 @@ impl Scaffold {
         self.size.cols * 1 / 2
     }
 
+    fn logger_height() -> usize {
+        20
+    }
+
     pub fn header(&self) -> Location {
         Location {
             line: 0,
@@ -77,7 +81,7 @@ impl Scaffold {
         let line = 2;
         let column = 0;
         let width = self.vsplit() - 1;
-        let height = self.size.rows - 3;
+        let height = self.size.rows - 3 - Self::logger_height();
         Location {
             line,
             column,
@@ -90,7 +94,7 @@ impl Scaffold {
         let line = 2;
         let column = self.vsplit() + 1;
         let width = self.vsplit() - 1;
-        let height = self.size.rows - 3;
+        let height = self.size.rows - 3 - Self::logger_height();
         Location {
             line,
             column,
@@ -101,10 +105,19 @@ impl Scaffold {
 
     pub fn details_separator(&self) -> Location {
         Location {
-            line: 1,
+            line: 2,
             column: self.vsplit(),
-            height: self.size.rows - 2,
+            height: self.size.rows - 3 - Self::logger_height(),
             width: 1,
+        }
+    }
+
+    pub fn logger(&self) -> Location {
+        Location {
+            line: self.size.rows - 1 - Self::logger_height(),
+            column: 0,
+            height: Self::logger_height(),
+            width: self.size.cols,
         }
     }
 }

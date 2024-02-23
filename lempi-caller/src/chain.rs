@@ -1,13 +1,5 @@
 use frame_metadata::{v15::RuntimeMetadataV15, RuntimeMetadata};
 
-use jsonrpsee::core::{
-    client::{BatchResponse, ClientT},
-    params::BatchRequestBuilder,
-    traits::ToRpcParams,
-};
-use jsonrpsee::types::{request::Request, Params};
-use jsonrpsee::{rpc_params, server::Server, ws_client::WsClientBuilder, RpcModule};
-
 use parity_scale_codec::Decode;
 
 use primitive_types::H256;
@@ -19,42 +11,26 @@ use smoldot_light::{
     platform::DefaultPlatform, AddChainConfig, AddChainSuccess, ChainId, Client, JsonRpcResponses,
 };
 
-use std::{iter, num::NonZeroU32, sync::Arc};
+use std::{
+    fs::File,
+    io::{Read, Write},
+    iter,
+    num::NonZeroU32,
+    sync::Arc,
+};
 
 use tokio::{
+    macros::support::Poll,
     sync::{broadcast, mpsc},
     time::{sleep, Duration},
 };
 
-/*
-struct SmoldotClient {
+use crate::author::Address;
 
+struct NonceRequest {
+    id: H256,
+    res: Option<u64>,
 }
-
-impl ClientT for SmoldotClient {
-    /// Send a [notification request](https://www.jsonrpc.org/specification#notification)
-    async fn notification<Params>(&self, method: &str, params: Params) -> Result<(), Error>
-        where
-            Params: ToRpcParams + Send,
-        {
-            let params = params.to_rpc_params()?;
-        }
-
-    /// Send a [method call request](https://www.jsonrpc.org/specification#request_object).
-    async fn request<R, Params>(&self, method: &str, params: Params) -> Result<Value, Error> {
-        }
-
-    /// Send a [batch request](https://www.jsonrpc.org/specification#batch).
-    ///
-    /// The response to batch are returned in the same order as it was inserted in the batch.
-    ///
-    ///
-    /// Returns `Ok` if all requests in the batch were answered.
-    /// Returns `Error` if the network failed or any of the responses could be parsed a valid JSON-RPC response.
-    async fn batch_request<'a, R>(&self, batch: BatchRequestBuilder<'a>) -> Result<BatchResponse<'a, Value>, Error> {
-        }
-}
-*/
 
 /// Abstraction to connect to chain
 ///
@@ -64,9 +40,11 @@ pub struct Blockchain {
     client: Client<Arc<DefaultPlatform>, ()>,
     genesis_hash: H256,
     id: ChainId,
-    responses: JsonRpcResponses<Arc<DefaultPlatform>>,
+    res: mpsc::Receiver<Value>,
     metadata: RuntimeMetadataV15,
-    specs: Map<String, Value>
+    nonce_request: Option<NonceRequest>,
+    specs: Map<String, Value>,
+    log: Vec<String>,
 }
 
 impl Blockchain {
@@ -77,7 +55,7 @@ impl Blockchain {
         ));
         let chain_config = AddChainConfig {
             user_data: (),
-            specification: include_str!("../../chain-specs/westend.json"),
+            specification: include_str!("../../chain-specs/polkadot.json"),
             database_content: "",
             potential_relay_chains: iter::empty(),
             json_rpc: smoldot_light::AddChainConfigJsonRpc::Enabled {
@@ -85,37 +63,46 @@ impl Blockchain {
                 max_subscriptions: u32::max_value(),
             },
         };
+        println!("smoldot started...");
         let AddChainSuccess {
             chain_id: id,
             json_rpc_responses: responses,
         } = client.add_chain(chain_config).unwrap();
+        println!("chain connected...");
         let mut responses = responses.unwrap();
 
-        //let (request_id_tx, mut request_id_rx) = tokyo::
-
-        /*
-        tokio::spawn(async move {
-            let requests = Vec::new();
-
-            //process received requests
-
-        });*/
-
         client
-            .json_rpc_request(
-                json_request(
-                    1,
-                    "state_call",
-                    r#""Metadata_metadata_at_version", "0x0f000000""#,
-                ),
-                id,
-            )
+            .json_rpc_request(json_request(1, "chain_getRuntimeVersion", ""), id)
             .unwrap();
 
-        let metadata: JsonResponse =
+        let version_r: JsonResponse =
             serde_json::from_str(&responses.next().await.unwrap()).unwrap();
 
-        let metadata = if let Value::String(hex_meta) = metadata.result {
+        /*
+        let block_hash = if let Value::Number(a) = version.result {
+            H256(unhex(&a).unwrap().try_into().unwrap())
+        } else {
+            panic!("block fetch failed")
+        };*/
+
+        let version = if let Value::Number(a) = &version_r.result["specVersion"] {
+            a.as_u64().unwrap()
+        } else {
+            panic!();
+        };
+        let name = if let Value::String(s) = &version_r.result["specName"] {
+            s
+        } else {
+            panic!();
+        };
+
+        println!("{} version {}", name, version);
+
+        let metadata_cache = metadata_cache(name, &version.to_string());
+
+        let metadata = if let Ok(mut file) = File::open(&metadata_cache) {
+            let mut hex_meta = String::new();
+            file.read_to_string(&mut hex_meta).unwrap();
             let b = unhex(&hex_meta).unwrap();
             let a = Option::<Vec<u8>>::decode(&mut &b[..]).unwrap();
             let meta = a.unwrap();
@@ -128,30 +115,54 @@ impl Blockchain {
                 Err(_) => panic!("Metadata could not be decoded"),
             }
         } else {
-            panic!("wtf")
+            client
+                .json_rpc_request(
+                    json_request(
+                        1,
+                        "state_call",
+                        r#""Metadata_metadata_at_version", "0x0f000000""#,
+                    ),
+                    id,
+                )
+                .unwrap();
+
+            let metadata_r: JsonResponse =
+                serde_json::from_str(&responses.next().await.unwrap()).unwrap();
+
+            if let Value::String(hex_meta) = metadata_r.result {
+                let mut file = File::create(metadata_cache).unwrap();
+                file.write_all(hex_meta.as_bytes()).unwrap();
+
+                let b = unhex(&hex_meta).unwrap();
+                let a = Option::<Vec<u8>>::decode(&mut &b[..]).unwrap();
+                let meta = a.unwrap();
+                if !meta.starts_with(&[109, 101, 116, 97]) {
+                    panic!("Rpc response error: metadata prefix 'meta' not found");
+                };
+                match RuntimeMetadata::decode(&mut &meta[4..]) {
+                    Ok(RuntimeMetadata::V15(out)) => out,
+                    Ok(_) => panic!("Only metadata V15 is supported"),
+                    Err(_) => panic!("Metadata could not be decoded"),
+                }
+            } else {
+                panic!("wtf")
+            }
         };
 
-        let req = json_request(
-                    1,
-                    "chain_getBlockHash",
-                    r#"0"#,
-                );
-        client
-            .json_rpc_request(
-                req,
-                id,
-            )
-            .unwrap();
+        println!("metadata fetched...");
+
+        let req = json_request(1, "chain_getBlockHash", r#"0"#);
+        client.json_rpc_request(req, id).unwrap();
 
         let res = &responses.next().await.unwrap();
-        let genesis_hash: JsonResponse =
-            serde_json::from_str(res).unwrap();
+        let genesis_hash: JsonResponse = serde_json::from_str(res).unwrap();
 
         let genesis_hash = if let Value::String(a) = genesis_hash.result {
             H256(unhex(&a).unwrap().try_into().unwrap())
         } else {
             panic!("block fetch failed")
         };
+        println!("genesis hash fetched...");
 
         client
             .json_rpc_request(json_request(1, "chain_getBlockHash", ""), id)
@@ -165,42 +176,45 @@ impl Blockchain {
         } else {
             panic!("block fetch failed")
         };
+        println!("a block fetched...");
 
-        let req = json_request(1, "system_properties", "");//&format!("\"0x{}\"", hex::encode(block_hash.0)));
-        client
-            .json_rpc_request(req, id)
-            .unwrap();
+        let req = json_request(1, "system_properties", ""); //&format!("\"0x{}\"", hex::encode(block_hash.0)));
+        client.json_rpc_request(req, id).unwrap();
 
-        let specs: Value =
-            serde_json::from_str(&responses.next().await.unwrap()).unwrap();
+        let specs: Value = serde_json::from_str(&responses.next().await.unwrap()).unwrap();
 
         let specs = match &specs["result"] {
             Value::Object(a) => a.clone(),
             _ => panic!("specs is not a map: {:?}", specs),
         };
+        println!("specs fetched...");
 
+        // Start block reception
         client
-            .json_rpc_request(json_request(1, "chain_getBlockHash", ""), id)
+            .json_rpc_request(json_request(2, "chain_subscribeFinalizedHeads", ""), id)
             .unwrap();
 
-        let res = &responses.next().await.unwrap();
-        let block_hash: JsonResponse =
-            serde_json::from_str(res).unwrap();
+        let _ = &responses.next().await.unwrap();
 
-        let block_hash = if let Value::String(a) = block_hash.result {
-            H256(unhex(&a).unwrap().try_into().unwrap())
-        } else {
-            panic!("block fetch failed")
-        };
+        let (rpc_tx, mut res) = mpsc::channel(256);
+
+        tokio::spawn(async move {
+            loop {
+                let r: Value = serde_json::from_str(&responses.next().await.unwrap()).unwrap();
+                rpc_tx.send(r).await.unwrap();
+            }
+        });
 
         Self {
             block_hash,
             client,
             genesis_hash,
             id,
-            responses,
+            res,
             metadata,
+            nonce_request: None,
             specs,
+            log: Vec::new(),
         }
     }
 
@@ -219,9 +233,123 @@ impl Blockchain {
     pub fn specs(&self) -> Map<String, Value> {
         self.specs.clone()
     }
+
+    pub fn nonce(&mut self, address: H256, ss58: u16) -> Option<u64> {
+        match &self.nonce_request {
+            Some(a) => {
+                if a.id == address {
+                    a.res
+                } else {
+                    self.nonce_request = Some(NonceRequest {
+                        id: address,
+                        res: None,
+                    });
+                    let req = json_request(
+                        2,
+                        "system_accountNextIndex",
+                        &format!(
+                            "\"{}\"",
+                            Address::from_public(address)
+                                .into_account_id32()
+                                .as_base58(ss58)
+                                .to_string()
+                        ),
+                    );
+                    self.client.json_rpc_request(req, self.id).unwrap();
+
+                    None
+                }
+            }
+            None => {
+                self.nonce_request = Some(NonceRequest {
+                    id: address,
+                    res: None,
+                });
+                let req = json_request(
+                    2,
+                    "system_accountNextIndex",
+                    &format!(
+                        "\"{}\"",
+                        Address::from_public(address)
+                            .into_account_id32()
+                            .as_base58(ss58)
+                            .to_string()
+                    ),
+                );
+                self.client.json_rpc_request(req, self.id).unwrap();
+
+                None
+            }
+        }
+    }
+
+    pub fn send(&mut self, unchecked_extrinsic: &[u8]) {
+        let req = json_request(
+            9,
+            "author_submitAndWatchExtrinsic",
+            &format!("\"0x{}\"", hex::encode(&unchecked_extrinsic)),
+        );
+        self.log.push(format!("{}", req));
+        self.client.json_rpc_request(req, self.id).unwrap();
+    }
+
+    pub fn log(&mut self) -> String {
+        let mut out = String::new();
+        while let Some(a) = self.log.pop() {
+            out += "chain: ";
+            out += &a;
+            out += "\r\n";
+        }
+        out
+    }
+
+    pub fn crank(&mut self) -> bool {
+        let mut modified = false;
+        while let Ok(a) = self.res.try_recv() {
+            modified = true;
+            let mut unknown = true;
+            match &a["method"] {
+                Value::String(s) => match s.as_str() {
+                    "chain_finalizedHead" => match &a["params"]["result"]["parentHash"] {
+                        Value::String(h) => {
+                            self.block_hash = H256(unhex(&h).unwrap().try_into().unwrap());
+                            unknown = false;
+                        }
+                        _ => (),
+                    },
+                    _ => (),
+                },
+                _ => (),
+            }
+            match &a["id"].as_u64() {
+                Some(2) => match &a["result"] {
+                    Value::Number(n) => match self.nonce_request {
+                        Some(ref mut b) => {
+                            b.res = Some(n.as_u64().unwrap());
+                            unknown = false;
+                        }
+                        None => (),
+                    },
+                    _ => (),
+                },
+                Some(9) => self.log.push(format!("submitted: {:?}", a)),
+                _ => (),
+            }
+            if unknown {
+                self.log.push(format!("Something else received: {:?}", a))
+            };
+        }
+        modified
+    }
 }
 
-const ADDRESS: &str = "wss://westend-rpc.polkadot.io";
+fn metadata_cache(name: &str, version: &str) -> String {
+    format!("../cache/metadata_{}_{}.tmp", name, version)
+}
+
+fn specs_cache(name: &str, version: &str) -> String {
+    format!("../cache/specs_{}_{}.tmp", name, version)
+}
 
 /// Local errors
 #[derive(Debug)]
@@ -241,7 +369,7 @@ fn json_request(index: u32, method: &str, params: &str) -> String {
     part1 + &format!("{}", index) + part2 + method + part3 + params + part4
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct JsonResponse {
     id: usize,
     result: Value,
@@ -273,115 +401,3 @@ where
     };
     return None;
 }
-
-/*
-pub async fn get_metadata(hash: H256) -> RuntimeMetadataV15 {
-    let client = match WsClientBuilder::default()
-        .build(ADDRESS.to_string()) //wss://node-shave.zymologia.fi:443".to_string())
-        .await
-    {
-        Ok(a) => a,
-        Err(e) => panic!("ws client builder crashed"),
-    };
-
-    let metadata: Value = client
-        .request(
-            "state_call",
-            rpc_params!["Metadata_metadata_at_version", "0f000000"],
-        )
-        .await
-        .unwrap();
-
-    /* V14 legacy
-    let metadata: Value = match client
-        .request("state_getMetadata", rpc_params![hex::encode(hash.0)])
-        .await
-    {
-        Ok(a) => a,
-        Err(e) => panic!("{:?}", e),
-    };
-    */
-
-    let metadata_v15 = if let Value::String(hex_meta) = metadata {
-        let b = unhex(&hex_meta).unwrap();
-        let a = Option::<Vec<u8>>::decode(&mut &b[..]).unwrap();
-        let meta = a.unwrap();
-        if !meta.starts_with(&[109, 101, 116, 97]) {
-            panic!("Rpc response error: metadata prefix 'meta' not found");
-        };
-        match RuntimeMetadata::decode(&mut &meta[4..]) {
-            Ok(RuntimeMetadata::V15(out)) => out,
-            Ok(_) => panic!("Only metadata V15 is supported"),
-            Err(_) => panic!("Metadata could not be decoded"),
-        }
-    } else {
-        panic!("wtf")
-    };
-    metadata_v15
-}
-
-pub async fn get_genesis_hash() -> H256 {
-    let client = match WsClientBuilder::default().build(ADDRESS.to_string()).await {
-        Ok(a) => a,
-        Err(e) => panic!("ws client builder crashed"),
-    };
-    let params = rpc_params![Value::Number(Number::from(0u8))];
-    let genesis_hash_data: Value = match client.request("chain_getBlockHash", params).await {
-        Ok(a) => a,
-        Err(e) => {
-            panic!("block fetch failed")
-        }
-    };
-    if let Value::String(a) = genesis_hash_data {
-        H256(unhex(&a).unwrap().try_into().unwrap())
-    } else {
-        panic!("block fetch failed")
-    }
-}
-
-pub async fn get_specs(hash: H256) -> Map<String, Value> {
-    let client = match WsClientBuilder::default().build(ADDRESS.to_string()).await {
-        Ok(a) => a,
-        Err(e) => panic!("ws client builder crashed"),
-    };
-
-    match client
-        .request("system_properties", rpc_params![hex::encode(hash.0)])
-        .await
-    {
-        Ok(a) => a,
-        Err(e) => panic!("{:?}", e),
-    }
-}
-
-pub fn block_watch() -> (broadcast::Receiver<H256>, broadcast::Receiver<H256>) {
-    let (block_tx, mut block_rx) = broadcast::channel(1);
-    let mut block_rx2 = block_tx.subscribe();
-
-    tokio::spawn(async move {
-        let client = match WsClientBuilder::default().build(ADDRESS.to_string()).await {
-            Ok(a) => a,
-            Err(e) => panic!("ws client builder crashed"),
-        };
-        loop {
-            let params = rpc_params![];
-            let block_hash_data: Value = match client.request("chain_getBlockHash", params).await {
-                Ok(a) => a,
-                Err(e) => {
-                    panic!("block fetch failed")
-                }
-            };
-            let block_hash = if let Value::String(a) = block_hash_data {
-                a
-            } else {
-                panic!("block fetch failed")
-            };
-            block_tx
-                .send(H256(unhex(&block_hash).unwrap().try_into().unwrap()))
-                .unwrap();
-            sleep(Duration::new(10, 0)).await;
-        }
-    });
-    (block_rx, block_rx2)
-}
-*/

@@ -20,7 +20,7 @@ impl CallField {
         let mut midscreen = 0;
         let mut cursor_seen = false;
         let (_, ysize) = self.surface.dimensions();
-        let midscreen_threshold = ysize/2;
+        let midscreen_threshold = ysize / 2;
 
         self.surface
             .add_change(Change::ClearScreen(AnsiColor::Black.into()));
@@ -29,12 +29,12 @@ impl CallField {
                 cursor_seen = true;
             }
             if cursor_seen {
-                    midscreen += 1;
-                    if midscreen > midscreen_threshold {
-                        self.surface.add_change(" + + + ( more )\n\r");
-                        break;
-                    }
+                midscreen += 1;
+                if midscreen > midscreen_threshold {
+                    self.surface.add_change(" + + + ( more )\n\r");
+                    break;
                 }
+            }
             self.render_field(card, *position == depth)
         }
         &self.surface
