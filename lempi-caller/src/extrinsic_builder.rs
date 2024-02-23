@@ -186,15 +186,6 @@ impl<'a, 'b> Builder<'a, 'b> {
             let address_book = self.address_book;
             let author = self.author();
             let signable = self.signable().clone();
-            /* This shows blob that would be signed in log
-            match self.observable_field().content {
-                TypeContentToFill::SpecialType(SpecialTypeToFill::SignatureSr25519(_)) => {
-            if let Some(a) = &signable {
-                self.log.push(format!("got signable: {:?}", hex::encode(a)));
-            }},
-            _ => (),
-            }
-            */
             match self.modifiable_field().content {
                 TypeContentToFill::ArrayU8(ref mut a) => {
                     a.upd_from_utf8(&buffer);
@@ -232,7 +223,9 @@ impl<'a, 'b> Builder<'a, 'b> {
                         }
                     }
                 }
-
+                TypeContentToFill::SpecialType(ref mut a) => {
+                    a.upd_from_str(&buffer);
+                }
                 TypeContentToFill::Variant(ref mut a) => {
                     if let Some(s) = selector {
                         match VariantSelector::new_at::<(), RuntimeMetadataV15>(

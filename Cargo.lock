@@ -1613,9 +1613,9 @@ dependencies = [
 
 [[package]]
 name = "image"
-version = "0.24.8"
+version = "0.24.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "034bbe799d1909622a74d1193aa50147769440040ff36cb2baa947609b0a4e23"
+checksum = "5690139d2f55868e080017335e4b94cb7414274c74f1669c84fb5feba2c9f69d"
 dependencies = [
  "bytemuck",
  "byteorder",
@@ -3165,12 +3165,12 @@ dependencies = [
 
 [[package]]
 name = "socket2"
-version = "0.5.5"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b5fac59a5cb5dd637972e5fca70daf0523c9067fcdc4842f053dae04a18f8e9"
+checksum = "05ffd9c0a93b7543e062e759284fcf5f5e3b098501104bfbdde4d404db792871"
 dependencies = [
  "libc",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3190,20 +3190,6 @@ dependencies = [
 
 [[package]]
 name = "sp-arithmetic"
-version = "19.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e41f710a77e9debd1c9b80f862709dce648e50f0904cde4117488e7d11d4796d"
-dependencies = [
- "integer-sqrt",
- "num-traits",
- "parity-scale-codec",
- "scale-info",
- "sp-std 11.0.0",
- "static_assertions",
-]
-
-[[package]]
-name = "sp-arithmetic"
 version = "24.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "afa823ca5adc490d47dccb41d69ad482bc57a317bd341de275868378f48f131c"
@@ -3212,7 +3198,7 @@ dependencies = [
  "num-traits",
  "parity-scale-codec",
  "scale-info",
- "sp-std 14.0.0",
+ "sp-std",
  "static_assertions",
 ]
 
@@ -3252,7 +3238,7 @@ dependencies = [
  "sp-debug-derive",
  "sp-externalities",
  "sp-runtime-interface",
- "sp-std 14.0.0",
+ "sp-std",
  "sp-storage",
  "ss58-registry",
  "substrate-bip39",
@@ -3304,7 +3290,7 @@ checksum = "e7096ed024cec397804864898b093b51e14c7299f1d00c67dd5800330e02bb82"
 dependencies = [
  "environmental",
  "parity-scale-codec",
- "sp-std 14.0.0",
+ "sp-std",
  "sp-storage",
 ]
 
@@ -3320,7 +3306,7 @@ dependencies = [
  "primitive-types",
  "sp-externalities",
  "sp-runtime-interface-proc-macro",
- "sp-std 14.0.0",
+ "sp-std",
  "sp-storage",
  "sp-tracing",
  "sp-wasm-interface",
@@ -3343,12 +3329,6 @@ dependencies = [
 
 [[package]]
 name = "sp-std"
-version = "11.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c91d32e165d08a14098ce5ec923eaec59d1d0583758a18a770beec1b780b0d0"
-
-[[package]]
-name = "sp-std"
 version = "14.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12f8ee986414b0a9ad741776762f4083cd3a5128449b982a3919c4df36874834"
@@ -3364,7 +3344,7 @@ dependencies = [
  "ref-cast",
  "serde",
  "sp-debug-derive",
- "sp-std 14.0.0",
+ "sp-std",
 ]
 
 [[package]]
@@ -3374,7 +3354,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0351810b9d074df71c4514c5228ed05c250607cba131c1c9d1526760ab69c05c"
 dependencies = [
  "parity-scale-codec",
- "sp-std 14.0.0",
+ "sp-std",
  "tracing",
  "tracing-core",
  "tracing-subscriber",
@@ -3390,7 +3370,7 @@ dependencies = [
  "impl-trait-for-tuples",
  "log",
  "parity-scale-codec",
- "sp-std 14.0.0",
+ "sp-std",
  "wasmtime",
 ]
 
@@ -3449,7 +3429,7 @@ dependencies = [
 [[package]]
 name = "substrate-constructor"
 version = "0.1.0"
-source = "git+https://github.com/Alzymologist/substrate-constructor#da97cd671e57bf96070cd4a9562a7c7397d7e64f"
+source = "git+https://github.com/Alzymologist/substrate-constructor#6df6d2f14af45acd068bf0e847e9bc3516ce3691"
 dependencies = [
  "bitvec",
  "external-memory-tools",
@@ -3459,7 +3439,7 @@ dependencies = [
  "parity-scale-codec",
  "primitive-types",
  "scale-info",
- "sp-arithmetic 19.0.0",
+ "sp-arithmetic",
  "substrate_parser",
 ]
 
@@ -3480,7 +3460,7 @@ dependencies = [
  "plot_icon",
  "primitive-types",
  "scale-info",
- "sp-arithmetic 24.0.0",
+ "sp-arithmetic",
  "sp-core-hashing",
 ]
 

@@ -78,13 +78,6 @@ impl Blockchain {
         let version_r: JsonResponse =
             serde_json::from_str(&responses.next().await.unwrap()).unwrap();
 
-        /*
-        let block_hash = if let Value::Number(a) = version.result {
-            H256(unhex(&a).unwrap().try_into().unwrap())
-        } else {
-            panic!("block fetch failed")
-        };*/
-
         let version = if let Value::Number(a) = &version_r.result["specVersion"] {
             a.as_u64().unwrap()
         } else {
