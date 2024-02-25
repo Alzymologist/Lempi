@@ -48,14 +48,22 @@ pub struct Blockchain {
 }
 
 impl Blockchain {
-    pub async fn new() -> Self {
+    pub async fn new(specpath: &str) -> Self {
         let mut client = Client::new(DefaultPlatform::new(
             env!("CARGO_PKG_NAME").into(),
             env!("CARGO_PKG_VERSION").into(),
         ));
+
+        println!("{}", specpath);
+        let mut spec = String::new();
+        match File::open(specpath) {
+            Ok(mut file) => file.read_to_string(&mut spec).unwrap(),
+            Err(e) => panic!("{}", e),
+        };
+            
         let chain_config = AddChainConfig {
             user_data: (),
-            specification: include_str!("../../chain-specs/polkadot.json"),
+            specification: &spec,
             database_content: "",
             potential_relay_chains: iter::empty(),
             json_rpc: smoldot_light::AddChainConfigJsonRpc::Enabled {

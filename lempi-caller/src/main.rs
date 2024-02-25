@@ -1,3 +1,5 @@
+use clap::Parser;
+
 use std::time::Duration;
 
 use serde_json::Value;
@@ -32,9 +34,20 @@ use extrinsic_builder::Builder;
 mod scaffold;
 use scaffold::Scaffold;
 
+/// Command-line arguments
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Name of the person to greet
+    #[arg(short, long, default_value_t = String::from("polkadot"))]
+    chainspec: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let mut bc = chain::Blockchain::new().await;
+    let args = Args::parse();
+
+    let mut bc = chain::Blockchain::new(&format!("../chain-specs/{}.json", args.chainspec)).await;
 
     // TODO: this should be a reference and builder should die and be reborn
     // if this changes
