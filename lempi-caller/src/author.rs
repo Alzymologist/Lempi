@@ -1,6 +1,8 @@
+use mnemonic_external::{regular::InternalWordList, WordSet};
+
 use primitive_types::H256;
 
-use sp_core::{sr25519, Pair};
+use substrate_crypto_light::{common::cut_path, sr25519};
 
 use substrate_parser::additional_types::AccountId32;
 
@@ -24,9 +26,18 @@ impl Address {
     }
 
     pub fn from_derivation(full_address: &str) -> Result<Self, Error> {
-        match sr25519::Pair::from_string(full_address, None) {
+        // TODO!
+        let mut word_set = WordSet::new();
+        for word in "bottom drive obey lake curtain smoke basket hold race lonely fit walk".split(' ') {
+            word_set
+                .add_word(word, &InternalWordList)
+                .unwrap();
+        }
+        let entropy = word_set.to_entropy().unwrap();
+        let derivation = cut_path(full_address).unwrap();
+        match sr25519::Pair::from_entropy_and_full_derivation(&entropy, derivation) {
             Ok(a) => Ok(Self::Pair(a)),
-            Err(e) => Err(Error::DerivationFailed(e.to_string())),
+            Err(e) => Err(Error::DerivationFailed(format!("{:?}", e))),
         }
     }
 
@@ -46,7 +57,7 @@ impl Address {
     pub fn public(&self) -> H256 {
         match self {
             Address::Public(a) => *a,
-            Address::Pair(a) => a.public().into(),
+            Address::Pair(a) => H256(a.public().0),
         }
     }
 

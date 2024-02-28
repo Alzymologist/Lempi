@@ -127,8 +127,9 @@ impl Blockchain {
                 )
                 .unwrap();
 
-            let metadata_r: JsonResponse =
-                serde_json::from_str(&responses.next().await.unwrap()).unwrap();
+            let resp = &responses.next().await.unwrap();
+            println!("{:?}", resp);
+            let metadata_r: JsonResponse = serde_json::from_str(&responses.next().await.unwrap()).unwrap();
 
             if let Value::String(hex_meta) = metadata_r.result {
                 let mut file = File::create(metadata_cache).unwrap();
