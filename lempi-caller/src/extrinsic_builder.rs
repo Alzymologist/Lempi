@@ -13,7 +13,9 @@ use substrate_constructor::fill_prepare::{
 use substrate_constructor::finalize::Finalize;
 use substrate_constructor::try_fill::{TryBytesFill, TryFill};
 
-use substrate_parser::additional_types::SignatureSr25519;
+use substrate_crypto_light::{common::AsBase58, sr25519::Signature};
+
+use substrate_parser::ShortSpecs;
 
 use crate::author::AddressBook;
 
@@ -58,8 +60,7 @@ pub struct Builder<'a, 'b> {
     metadata: &'a RuntimeMetadataV15,
     position: usize,
     selector: Option<Selector>,
-    specs: Map<String, Value>,
-    pub ss58: u16,
+    specs: ShortSpecs,
     transaction: TransactionToFill,
     log: Vec<String>,
 }
@@ -69,18 +70,9 @@ impl<'a, 'b> Builder<'a, 'b> {
         metadata: &'a RuntimeMetadataV15,
         address_book: &'b AddressBook,
         genesis_hash: H256,
-        specs: Map<String, Value>,
+        specs: ShortSpecs,
     ) -> Self {
         let mut transaction = TransactionToFill::init(&mut (), metadata, genesis_hash).unwrap();
-        let ss58 = if let Some(Value::Number(a)) = specs.get("ss58Format") {
-            if let Some(b) = a.as_u64() {
-                b as u16
-            } else {
-                42
-            }
-        } else {
-            42
-        };
         Self {
             address_book,
             buffer: "".to_owned(),
@@ -90,19 +82,18 @@ impl<'a, 'b> Builder<'a, 'b> {
             position: 0,
             selector: None,
             specs,
-            ss58,
             transaction,
             log: Vec::new(),
         }
     }
 
     pub fn call(&self) -> Vec<Card> {
-        let mut output = steamroller(&self.transaction.author, 0, self.ss58);
-        output.append(&mut steamroller(&self.transaction.call, 0, self.ss58));
+        let mut output = steamroller(&self.transaction.author, 0, self.specs.base58prefix);
+        output.append(&mut steamroller(&self.transaction.call, 0, self.specs.base58prefix));
         for extension in &self.transaction.extensions {
-            output.append(&mut steamroller(&extension, 0, self.ss58));
+            output.append(&mut steamroller(&extension, 0, self.specs.base58prefix));
         }
-        output.append(&mut steamroller(&self.transaction.signature, 0, self.ss58));
+        output.append(&mut steamroller(&self.transaction.signature, 0, self.specs.base58prefix));
         output
     }
 
@@ -217,7 +208,7 @@ impl<'a, 'b> Builder<'a, 'b> {
                             if let Some(signable) = signable {
                                 if let Some(signature) = address_book.authors()[pos].sign(&signable)
                                 {
-                                    *a = Some(SignatureSr25519(signature.0));
+                                    *a = Some(Signature(signature.0));
                                 }
                             }
                         }
@@ -361,11 +352,11 @@ impl<'a, 'b> Builder<'a, 'b> {
         panic!("Transaction seems to be empty");
     }
 
-    pub fn autofill(&mut self, block: H256, nonce: Option<u64>) {
+    pub fn autofill(&mut self, block: H256, number: u32, nonce: Option<u64>) {
         // TODO
-        self.transaction.populate_block_hash(block);
+        self.transaction.populate_block_info(Some(block), Some(number.into()));
         if let Some(a) = nonce {
-            self.transaction.populate_nonce(a)
+            self.transaction.populate_nonce(a as u32)
         };
     }
 
@@ -510,7 +501,7 @@ fn steamroller_inside(input: &TypeContentToFill, indent: usize, ss58: u16) -> Ve
             output.push(Card::new("AccountId32".to_string(), indent));
         }
         TypeContentToFill::SpecialType(SpecialTypeToFill::AccountId32(Some(a))) => {
-            output.push(Card::new(format!("address: {}", a.as_base58(ss58)), indent));
+            output.push(Card::new(format!("address: {}", a.to_base58_string(ss58)), indent));
             // TODO
         }
 
@@ -518,11 +509,11 @@ fn steamroller_inside(input: &TypeContentToFill, indent: usize, ss58: u16) -> Ve
             output.push(Card::new("Immortal".to_string(), indent));
         }
         TypeContentToFill::SpecialType(SpecialTypeToFill::Era(EraToFill::Mortal {
-            phase,
-            period,
+            block_number_entry,
+            period_entry,
         })) => {
             output.push(Card::new(
-                format!("Phase: {:?} Period: {:?}", phase, period),
+                format!("Phase: {:?} Period: {:?}", block_number_entry, period_entry),
                 indent,
             ));
         }

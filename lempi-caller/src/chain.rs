@@ -1,21 +1,47 @@
 use frame_metadata::{v15::RuntimeMetadataV15, RuntimeMetadata};
 
-use parity_scale_codec::Decode;
+use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
+use jsonrpsee::rpc_params;
+use jsonrpsee::ws_client::{WsClient, WsClientBuilder};
+
+use parity_scale_codec::{Decode, DecodeAll};
 
 use primitive_types::H256;
 
 use serde::Deserialize;
 use serde_json::{value::Value, Map, Number};
 
-use smoldot_light::{
-    platform::DefaultPlatform, AddChainConfig, AddChainSuccess, ChainId, Client, JsonRpcResponses,
+use substrate_constructor::{
+    fill_prepare::{
+        prepare_type, EraToFill, PrimitiveToFill, RegularPrimitiveToFill, SpecialTypeToFill,
+        SpecialtyUnsignedToFill, TransactionToFill, TypeContentToFill, TypeToFill, UnsignedToFill,
+        VariantSelector, DEFAULT_PERIOD,
+    },
+    finalize::Finalize,
+    storage_query::{
+        EntrySelector, EntrySelectorFunctional, FinalizedStorageQuery, StorageEntryTypeToFill,
+        StorageSelector, StorageSelectorFunctional,
+    },
+};
+
+use substrate_crypto_light::common::AsBase58;
+use substrate_parser::{AsMetadata, ShortSpecs};
+use substrate_parser::{
+    cards::{ExtendedData, FieldData, ParsedData},
+    decode_all_as_type,
+    decoding_sci::Ty,
+    propagated::Propagated,
+    special_indicators::SpecialtyUnsignedInteger,
+    ResolveType,
 };
 
 use std::{
     fs::File,
+    future::Future,
     io::{Read, Write},
     iter,
     num::NonZeroU32,
+    pin::Pin,
     sync::Arc,
 };
 
@@ -27,196 +53,107 @@ use tokio::{
 
 use crate::author::Address;
 
+/// Abstraction to distinguish block hash from many other H256 things
+#[derive(Debug, Clone)]
+pub struct BlockHash(pub primitive_types::H256);
+
+impl BlockHash {
+    /// Convert block hash to RPC-friendly format
+    pub fn to_string(&self) -> String {
+        format!("0x{}", hex::encode(&self.0))
+    }
+
+    /// Convert string returned by RPC to typesafe block
+    ///
+    /// TODO: integrate nicely with serde
+    pub fn from_str(s: &str) -> Self {
+        let block_hash_raw = unhex(&s).unwrap();
+        BlockHash(H256(
+            block_hash_raw
+                .try_into().unwrap(),
+        ))
+    }
+}
+
 struct NonceRequest {
     id: H256,
-    res: Option<u64>,
+    res: tokio::sync::oneshot::Receiver<Value>,
+    nonce: Option<u64>,
+}
+
+/// Fetch some runtime version identifier.
+///
+/// This does not have to be typesafe or anything; this could be used only to check if returned
+/// value changes - and reboot the whole connection then, regardless of nature of change.
+pub async fn runtime_version_identifier(
+    client: &WsClient,
+    block: &BlockHash,
+) -> Value {
+    client
+        .request("state_getRuntimeVersion", rpc_params![block.to_string()])
+        .await.unwrap()
+}
+
+pub async fn subscribe_blocks(client: &WsClient) -> Subscription<BlockHead> {
+    client
+        .subscribe(
+            "chain_subscribeFinalizedHeads",
+            rpc_params![],
+            "chain_unsubscribeFinalizedHeads",
+        )
+        .await.unwrap()
+}
+
+pub async fn get_value_from_storage(
+    client: &WsClient,
+    whole_key: &str,
+    block: &BlockHash,
+) -> Value {
+    client
+        .request(
+            "state_getStorage",
+            rpc_params![whole_key, block.to_string()],
+        )
+        .await.unwrap()
 }
 
 /// Abstraction to connect to chain
 ///
 /// This should run asynchronously under the hood and provide easy synchronous observables
 pub struct Blockchain {
-    block_hash: H256,
-    client: Client<Arc<DefaultPlatform>, ()>,
-    genesis_hash: H256,
-    id: ChainId,
-    res: mpsc::Receiver<Value>,
+    block: BlockHash,
+    block_number: u32,
+    client: WsClient,
+    genesis_hash: BlockHash,
     metadata: RuntimeMetadataV15,
     nonce_request: Option<NonceRequest>,
-    specs: Map<String, Value>,
+    extrinsic_watcher: Option<tokio::sync::mpsc::Receiver<Value>>,
+    specs: ShortSpecs,
     log: Vec<String>,
 }
 
 impl Blockchain {
     pub async fn new(specpath: &str) -> Self {
-        let mut client = Client::new(DefaultPlatform::new(
-            env!("CARGO_PKG_NAME").into(),
-            env!("CARGO_PKG_VERSION").into(),
-        ));
+        let client = WsClientBuilder::default().build(/*"wss://polkadot.api.onfinality.io/public-ws").await.unwrap();*/"wss://rpc.polkadot.io").await.unwrap();
+        let genesis_hash = genesis_hash(&client).await;
+        let mut blocks = subscribe_blocks(&client).await;
+        let block = next_block(&client, &mut blocks).await;
+        let version = runtime_version_identifier(&client, &block).await;
+        let metadata = metadata(&client, &block).await;
+        let block_number = current_block_number(&client, &metadata, &block).await;
+        let name = <RuntimeMetadataV15 as AsMetadata<()>>::spec_name_version(&metadata).unwrap().spec_name;
+        let specs = specs(&client, &metadata, &block).await;
 
-        println!("{}", specpath);
-        let mut spec = String::new();
-        match File::open(specpath) {
-            Ok(mut file) => file.read_to_string(&mut spec).unwrap(),
-            Err(e) => panic!("{}", e),
-        };
-            
-        let chain_config = AddChainConfig {
-            user_data: (),
-            specification: &spec,
-            database_content: "",
-            potential_relay_chains: iter::empty(),
-            json_rpc: smoldot_light::AddChainConfigJsonRpc::Enabled {
-                max_pending_requests: NonZeroU32::new(u32::max_value()).unwrap(),
-                max_subscriptions: u32::max_value(),
-            },
-        };
-        println!("smoldot started...");
-        let AddChainSuccess {
-            chain_id: id,
-            json_rpc_responses: responses,
-        } = client.add_chain(chain_config).unwrap();
-        println!("chain connected...");
-        let mut responses = responses.unwrap();
-
-        client
-            .json_rpc_request(json_request(1, "chain_getRuntimeVersion", ""), id)
-            .unwrap();
-
-        let version_r: JsonResponse =
-            serde_json::from_str(&responses.next().await.unwrap()).unwrap();
-
-        let version = if let Value::Number(a) = &version_r.result["specVersion"] {
-            a.as_u64().unwrap()
-        } else {
-            panic!();
-        };
-        let name = if let Value::String(s) = &version_r.result["specName"] {
-            s
-        } else {
-            panic!();
-        };
-
-        println!("{} version {}", name, version);
-
-        let metadata_cache = metadata_cache(name, &version.to_string());
-
-        let metadata = if let Ok(mut file) = File::open(&metadata_cache) {
-            let mut hex_meta = String::new();
-            file.read_to_string(&mut hex_meta).unwrap();
-            let b = unhex(&hex_meta).unwrap();
-            let a = Option::<Vec<u8>>::decode(&mut &b[..]).unwrap();
-            let meta = a.unwrap();
-            if !meta.starts_with(&[109, 101, 116, 97]) {
-                panic!("Rpc response error: metadata prefix 'meta' not found");
-            };
-            match RuntimeMetadata::decode(&mut &meta[4..]) {
-                Ok(RuntimeMetadata::V15(out)) => out,
-                Ok(_) => panic!("Only metadata V15 is supported"),
-                Err(_) => panic!("Metadata could not be decoded"),
-            }
-        } else {
-            client
-                .json_rpc_request(
-                    json_request(
-                        1,
-                        "state_call",
-                        r#""Metadata_metadata_at_version", "0x0f000000""#,
-                    ),
-                    id,
-                )
-                .unwrap();
-
-            let resp = &responses.next().await.unwrap();
-            println!("{:?}", resp);
-            let metadata_r: JsonResponse = serde_json::from_str(&responses.next().await.unwrap()).unwrap();
-
-            if let Value::String(hex_meta) = metadata_r.result {
-                let mut file = File::create(metadata_cache).unwrap();
-                file.write_all(hex_meta.as_bytes()).unwrap();
-
-                let b = unhex(&hex_meta).unwrap();
-                let a = Option::<Vec<u8>>::decode(&mut &b[..]).unwrap();
-                let meta = a.unwrap();
-                if !meta.starts_with(&[109, 101, 116, 97]) {
-                    panic!("Rpc response error: metadata prefix 'meta' not found");
-                };
-                match RuntimeMetadata::decode(&mut &meta[4..]) {
-                    Ok(RuntimeMetadata::V15(out)) => out,
-                    Ok(_) => panic!("Only metadata V15 is supported"),
-                    Err(_) => panic!("Metadata could not be decoded"),
-                }
-            } else {
-                panic!("wtf")
-            }
-        };
-
-        println!("metadata fetched...");
-
-        let req = json_request(1, "chain_getBlockHash", r#"0"#);
-        client.json_rpc_request(req, id).unwrap();
-
-        let res = &responses.next().await.unwrap();
-        let genesis_hash: JsonResponse = serde_json::from_str(res).unwrap();
-
-        let genesis_hash = if let Value::String(a) = genesis_hash.result {
-            H256(unhex(&a).unwrap().try_into().unwrap())
-        } else {
-            panic!("block fetch failed")
-        };
-        println!("genesis hash fetched...");
-
-        client
-            .json_rpc_request(json_request(1, "chain_getBlockHash", ""), id)
-            .unwrap();
-
-        let block_hash: JsonResponse =
-            serde_json::from_str(&responses.next().await.unwrap()).unwrap();
-
-        let block_hash = if let Value::String(a) = block_hash.result {
-            H256(unhex(&a).unwrap().try_into().unwrap())
-        } else {
-            panic!("block fetch failed")
-        };
-        println!("a block fetched...");
-
-        let req = json_request(1, "system_properties", ""); //&format!("\"0x{}\"", hex::encode(block_hash.0)));
-        client.json_rpc_request(req, id).unwrap();
-
-        let specs: Value = serde_json::from_str(&responses.next().await.unwrap()).unwrap();
-
-        let specs = match &specs["result"] {
-            Value::Object(a) => a.clone(),
-            _ => panic!("specs is not a map: {:?}", specs),
-        };
-        println!("specs fetched...");
-
-        // Start block reception
-        client
-            .json_rpc_request(json_request(2, "chain_subscribeFinalizedHeads", ""), id)
-            .unwrap();
-
-        let _ = &responses.next().await.unwrap();
-
-        let (rpc_tx, mut res) = mpsc::channel(256);
-
-        tokio::spawn(async move {
-            loop {
-                let r: Value = serde_json::from_str(&responses.next().await.unwrap()).unwrap();
-                rpc_tx.send(r).await.unwrap();
-            }
-        });
-
-        Self {
-            block_hash,
+    Self {
+            block: block.clone(),
+            block_number,
             client,
             genesis_hash,
-            id,
-            res,
             metadata,
             nonce_request: None,
+            extrinsic_watcher: None,
             specs,
-            log: Vec::new(),
+            log: vec![format!("Connected to {name} version {version} at block {block:?}")],
         }
     }
 
@@ -225,74 +162,57 @@ impl Blockchain {
     }
 
     pub fn genesis_hash(&self) -> H256 {
-        self.genesis_hash
+        self.genesis_hash.0
     }
 
     pub fn block(&self) -> H256 {
-        self.block_hash
+        self.block.0
     }
 
-    pub fn specs(&self) -> Map<String, Value> {
+    pub fn block_number(&self) -> u32 {
+        self.block_number
+    }
+
+    pub fn specs(&self) -> ShortSpecs {
         self.specs.clone()
     }
 
-    pub fn nonce(&mut self, address: H256, ss58: u16) -> Option<u64> {
-        match &self.nonce_request {
-            Some(a) => {
-                if a.id == address {
-                    a.res
-                } else {
-                    self.nonce_request = Some(NonceRequest {
-                        id: address,
-                        res: None,
-                    });
-                    let req = json_request(
-                        2,
-                        "system_accountNextIndex",
-                        &format!(
-                            "\"{}\"",
-                            Address::from_public(address)
-                                .into_account_id32()
-                                .as_base58(ss58)
-                                .to_string()
-                        ),
-                    );
-                    self.client.json_rpc_request(req, self.id).unwrap();
-
-                    None
-                }
-            }
-            None => {
-                self.nonce_request = Some(NonceRequest {
+    pub async fn nonce(&mut self, address: H256) -> Option<u64> {
+        if let Some(req) = &mut self.nonce_request {
+            if req.id == address {
+                req.nonce
+            } else {
+                let (tx, res) = tokio::sync::oneshot::channel();
+                get_nonce(&self.client, &address.to_string(), tx);
+                *req = NonceRequest {
                     id: address,
-                    res: None,
-                });
-                let req = json_request(
-                    2,
-                    "system_accountNextIndex",
-                    &format!(
-                        "\"{}\"",
-                        Address::from_public(address)
-                            .into_account_id32()
-                            .as_base58(ss58)
-                            .to_string()
-                    ),
-                );
-                self.client.json_rpc_request(req, self.id).unwrap();
-
+                    res,
+                    nonce: None,
+                };
                 None
             }
+        } else {
+            let (tx, res) = tokio::sync::oneshot::channel();
+            get_nonce(&self.client, &address.to_string(), tx);
+            self.nonce_request = Some(
+                NonceRequest {
+                    id: address,
+                    res,
+                    nonce: None,
+                }
+            );
+            None
         }
     }
 
-    pub fn send(&mut self, unchecked_extrinsic: &[u8]) {
-        let req = json_request(
-            9,
-            "author_submitAndWatchExtrinsic",
-            &format!("\"0x{}\"", hex::encode(&unchecked_extrinsic)),
-        );
-        self.log.push(format!("{}", req));
-        self.client.json_rpc_request(req, self.id).unwrap();
+    pub async fn send(&mut self, unchecked_extrinsic: &[u8]) {
+        let rpc_params = rpc_params![format!("{}", hex::encode(unchecked_extrinsic))];
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        self.extrinsic_watcher = Some(rx);
+        let client = &self.client;
+        let response: Value = client
+            .request("author_submitExtrinsic", rpc_params).await.unwrap();
+        self.log.push(format!("extrinsic submitted: {}, response {response}", format!("0x{}", hex::encode(unchecked_extrinsic))));
     }
 
     pub fn log(&mut self) -> String {
@@ -304,42 +224,20 @@ impl Blockchain {
         }
         out
     }
-
+    
     pub fn crank(&mut self) -> bool {
         let mut modified = false;
-        while let Ok(a) = self.res.try_recv() {
-            modified = true;
-            let mut unknown = true;
-            match &a["method"] {
-                Value::String(s) => match s.as_str() {
-                    "chain_finalizedHead" => match &a["params"]["result"]["parentHash"] {
-                        Value::String(h) => {
-                            self.block_hash = H256(unhex(&h).unwrap().try_into().unwrap());
-                            unknown = false;
-                        }
-                        _ => (),
-                    },
-                    _ => (),
-                },
-                _ => (),
-            }
-            match &a["id"].as_u64() {
-                Some(2) => match &a["result"] {
-                    Value::Number(n) => match self.nonce_request {
-                        Some(ref mut b) => {
-                            b.res = Some(n.as_u64().unwrap());
-                            unknown = false;
-                        }
-                        None => (),
-                    },
-                    _ => (),
-                },
-                Some(9) => self.log.push(format!("submitted: {:?}", a)),
-                _ => (),
-            }
-            if unknown {
-                self.log.push(format!("Something else received: {:?}", a))
+        if let Some(nonce_request) = &mut self.nonce_request {
+            if let Ok(a) = nonce_request.res.try_recv() {
+                modified = true;
+                nonce_request.nonce = Some(a.as_u64().unwrap());
             };
+        }
+        if let Some(extrinsic_watcher) = &mut self.extrinsic_watcher {
+            if let Ok(a) = extrinsic_watcher.try_recv() {
+                modified = true;
+                self.log.push(format!("{a:?}"));
+            }
         }
         modified
     }
@@ -371,12 +269,6 @@ fn json_request(index: u32, method: &str, params: &str) -> String {
     part1 + &format!("{}", index) + part2 + method + part3 + params + part4
 }
 
-#[derive(Debug, Deserialize)]
-struct JsonResponse {
-    id: usize,
-    result: Value,
-}
-
 /// Strip "0x" prefix from input and parse it into numbers
 fn unhex(hex_input: &str) -> Result<Vec<u8>, Error> {
     let hex_input_trimmed = {
@@ -403,3 +295,472 @@ where
     };
     return None;
 }
+
+/// fetch genesis hash, must be a hexadecimal string transformable into
+/// H256 format
+pub async fn genesis_hash(client: &WsClient) -> BlockHash {
+    let genesis_hash_request: Value = client
+        .request(
+            "chain_getBlockHash",
+            rpc_params![Value::Number(Number::from(0u8))],
+        )
+        .await
+        .unwrap();
+    match genesis_hash_request {
+        Value::String(x) => BlockHash::from_str(&x),
+        _ => panic!("ChainError::GenesisHashFormat"),
+    }
+}
+
+/// fetch block hash, to request later the metadata and specs for
+/// the same block
+pub async fn block_hash(
+    client: &WsClient,
+    number: Option<String>,
+) -> BlockHash {
+    let rpc_params = if let Some(a) = number {
+        rpc_params![a]
+    } else {
+        rpc_params![]
+    };
+    let block_hash_request: Value = client
+        .request("chain_getBlockHash", rpc_params)
+        .await.unwrap();
+    match block_hash_request {
+        Value::String(x) => BlockHash::from_str(&x),
+        _ => panic!("block hash is not string")
+    }
+}
+
+pub async fn current_block_number(
+    client: &WsClient,
+    metadata: &RuntimeMetadataV15,
+    block: &BlockHash,
+) -> u32 {
+    let block_number_query = block_number_query(metadata);
+    let fetched_value = get_value_from_storage(client, &block_number_query.key, block).await;
+    if let Value::String(hex_data) = fetched_value {
+        let value_data = unhex(&hex_data).unwrap();
+        let value = decode_all_as_type::<&[u8], (), RuntimeMetadataV15>(
+            &block_number_query.value_ty,
+            &value_data.as_ref(),
+            &mut (),
+            &metadata.types,
+        ).unwrap();
+        if let ParsedData::PrimitiveU32 {
+            value,
+            specialty: _,
+        } = value.data
+        {
+            value
+        } else {
+            panic!("ChainError::BlockNumberFormat")
+        }
+    } else {
+        panic!("ChainError::StorageValueFormat(fetched_value)")
+    }
+}
+
+/// fetch metadata at known block
+pub async fn metadata(
+    client: &WsClient,
+    block: &BlockHash,
+) -> RuntimeMetadataV15 {
+    let metadata_request: Value = client
+        .request(
+            "state_call",
+            rpc_params![
+                "Metadata_metadata_at_version",
+                "0x0f000000",
+                block.to_string()
+            ],
+        )
+        .await.unwrap();
+    match metadata_request {
+        Value::String(x) => {
+            let metadata_request_raw = unhex(&x).unwrap();
+            let maybe_metadata_raw = Option::<Vec<u8>>::decode_all(&mut &metadata_request_raw[..]).unwrap();
+            if let Some(meta_v15_bytes) = maybe_metadata_raw {
+                if meta_v15_bytes.starts_with(b"meta") {
+                    match RuntimeMetadata::decode_all(&mut &meta_v15_bytes[4..]) {
+                        Ok(RuntimeMetadata::V15(runtime_metadata_v15)) => {
+                            return runtime_metadata_v15
+                        }
+                        Ok(_) => panic!("ChainError::NoMetadataV15"),
+                        Err(_) => panic!("ChainError::MetadataNotDecodeable"),
+                    }
+                } else {
+                    panic!("ChainError::NoMetaPrefix");
+                }
+            } else {
+                panic!("ChainError::NoMetadataV15");
+            }
+        }
+        _ => panic!("ChainError::MetadataFormat"),
+    };
+}
+
+// fetch specs at known block
+pub async fn specs(
+    client: &WsClient,
+    metadata: &RuntimeMetadataV15,
+    block: &BlockHash,
+) -> ShortSpecs {
+    let specs_request: Value = client
+        .request("system_properties", rpc_params![block.to_string()])
+        .await.unwrap();
+    match specs_request {
+        Value::Object(properties) => system_properties_to_short_specs(&properties, &metadata),
+        _ => panic!("ChainError::PropertiesFormat"),
+    }
+}
+
+pub async fn next_block_number(blocks: &mut Subscription<BlockHead>) -> String {
+    match blocks.next().await {
+        Some(Ok(a)) => a.number,
+        Some(Err(e)) => panic!("{}", e),
+        None => panic!("ChainError::BlockSubscriptionTerminated"),
+    }
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "kebab-case")]
+pub struct BlockHead {
+    //digest: Value,
+    //extrinsics_root: String,
+    pub number: String,
+    //parent_hash: String,
+    //state_root: String,
+}
+
+pub async fn next_block(
+    client: &WsClient,
+    blocks: &mut Subscription<BlockHead>,
+) -> BlockHash {
+    block_hash(&client, Some(next_block_number(blocks).await)).await
+}
+
+pub fn system_properties_to_short_specs(
+    system_properties: &Map<String, Value>,
+    metadata: &RuntimeMetadataV15,
+) -> ShortSpecs {
+    let optional_prefix_from_meta = optional_prefix_from_meta(metadata);
+    let base58prefix = base58prefix(system_properties, optional_prefix_from_meta);
+    let decimals = decimals(system_properties);
+    let unit = unit(system_properties);
+    ShortSpecs {
+        base58prefix,
+        decimals,
+        unit,
+    }
+}
+
+pub fn base58prefix(
+    x: &Map<String, Value>,
+    optional_prefix_from_meta: Option<u16>,
+) -> u16 {
+    let base58prefix: u16 = match x.get("ss58Format") {
+        // base58 prefix is fetched in `system_properties` rpc call
+        Some(a) => match a {
+            // base58 prefix value is a number
+            Value::Number(b) => match b.as_u64() {
+                // number is integer and could be represented as `u64` (the only
+                // suitable interpretation available for `Number`)
+                Some(c) => match c.try_into() {
+                    // this `u64` fits into `u16` that base58 prefix is supposed
+                    // to be
+                    Ok(d) => match optional_prefix_from_meta {
+                        // base58 prefix was found in `SS58Prefix` constant of
+                        // the network metadata
+                        //
+                        // check that the prefixes match
+                        Some(prefix_from_meta) => {
+                            if prefix_from_meta == d {
+                                d
+                            } else {
+                                panic!("aaa");/*
+                                return Err(ChainError::Base58PrefixMismatch {
+                                    specs: d,
+                                    meta: prefix_from_meta,
+                                });*/
+                            }
+                        }
+
+                        // no base58 prefix was found in the network metadata
+                        None => d,
+                    },
+
+                    // `u64` value does not fit into `u16` base58 prefix format,
+                    // this is an error
+                    Err(_) => {
+                        panic!("(ChainError::Base58PrefixFormatNotSupported(a.to_string())")
+                    }
+                },
+
+                // base58 prefix value could not be presented as `u64` number,
+                // this is an error
+                None => panic!("ChainError::Base58PrefixFormatNotSupported(a.to_string())"),
+            },
+
+            // base58 prefix value is not a number, this is an error
+            _ => panic!("ChainError::Base58PrefixFormatNotSupported(a.to_string())"),
+        },
+
+        // no base58 prefix fetched in `system_properties` rpc call
+        None => match optional_prefix_from_meta {
+            // base58 prefix was found in `SS58Prefix` constant of the network
+            // metadata
+            Some(prefix_from_meta) => prefix_from_meta,
+
+            // no base58 prefix at all, this is an error
+            None => panic!("ChainError::NoBase58Prefix"),
+        },
+    };
+    base58prefix
+}
+
+pub fn unit(x: &Map<String, Value>) -> String {
+    match x.get("tokenSymbol") {
+        // unit info is fetched in `system_properties` rpc call
+        Some(a) => match a {
+            // fetched unit value is a `String`
+            Value::String(b) => {
+                // definitive unit found
+                b.to_string()
+            }
+
+            // fetched an array of units
+            Value::Array(b) => {
+                // array with a single element
+                if b.len() == 1 {
+                    // single `String` element array, process same as `String`
+                    if let Value::String(c) = &b[0] {
+                        // definitive unit found
+                        c.to_string()
+                    } else {
+                        // element is not a `String`, this is an error
+                        panic!("ChainError::UnitFormatNotSupported(a.to_string())")
+                    }
+                } else {
+                    // units are an array with more than one element
+                    panic!("ChainError::UnitFormatNotSupported(a.to_string())")
+                }
+            }
+
+            // unexpected unit format
+            _ => panic!("ChainError::UnitFormatNotSupported(a.to_string())"),
+        },
+
+        // unit missing
+        None => panic!("ChainError::NoUnit"),
+    }
+}
+
+pub fn decimals(x: &Map<String, Value>) -> u8 {
+    match x.get("tokenDecimals") {
+        // decimals info is fetched in `system_properties` rpc call
+        Some(a) => match a {
+            // fetched decimals value is a number
+            Value::Number(b) => match b.as_u64() {
+                // number is integer and could be represented as `u64` (the only
+                // suitable interpretation available for `Number`)
+                Some(c) => match c.try_into() {
+                    // this `u64` fits into `u8` that decimals is supposed to be
+                    Ok(d) => d,
+
+                    // this `u64` does not fit into `u8`, this is an error
+                    Err(_) => panic!("ChainError::DecimalsFormatNotSupported(a.to_string())"),
+                },
+
+                // number could not be represented as `u64`, this is an error
+                None => panic!("ChainError::DecimalsFormatNotSupported(a.to_string())"),
+            },
+
+            // fetched decimals is an array
+            Value::Array(b) => {
+                // array with only one element
+                if b.len() == 1 {
+                    // this element is a number, process same as
+                    // `Value::Number(_)`
+                    if let Value::Number(c) = &b[0] {
+                        match c.as_u64() {
+                            // number is integer and could be represented as
+                            // `u64` (the only suitable interpretation available
+                            // for `Number`)
+                            Some(d) => match d.try_into() {
+                                // this `u64` fits into `u8` that decimals is
+                                // supposed to be
+                                Ok(f) => f,
+
+                                // this `u64` does not fit into `u8`, this is an
+                                // error
+                                Err(_) => {
+                                    panic!("ChainError::DecimalsFormatNotSupported(a.to_string())")
+                                }
+                            },
+
+                            // number could not be represented as `u64`, this is
+                            // an error
+                            None => panic!("ChainError::DecimalsFormatNotSupported(a.to_string())"),
+                        }
+                    } else {
+                        // element is not a number, this is an error
+                        panic!("ChainError::DecimalsFormatNotSupported(a.to_string())")
+                    }
+                } else {
+                    // decimals are an array with more than one element
+                    panic!("ChainError::DecimalsFormatNotSupported(a.to_string())")
+                }
+            }
+
+            // unexpected decimals format
+            _ => panic!("ChainError::DecimalsFormatNotSupported(a.to_string())"),
+        },
+
+        // decimals are missing
+        None => panic!("ChainError::NoDecimals"),
+    }
+}
+
+pub fn optional_prefix_from_meta(metadata: &RuntimeMetadataV15) -> Option<u16> {
+    let mut base58_prefix_data = None;
+    for pallet in &metadata.pallets {
+        if pallet.name == "System" {
+            for system_constant in &pallet.constants {
+                if system_constant.name == "SS58Prefix" {
+                    base58_prefix_data = Some((&system_constant.value, &system_constant.ty));
+                    break;
+                }
+            }
+            break;
+        }
+    }
+    if let Some((value, ty_symbol)) = base58_prefix_data {
+        match decode_all_as_type::<&[u8], (), RuntimeMetadataV15>(
+            ty_symbol,
+            &value.as_ref(),
+            &mut (),
+            &metadata.types,
+        ) {
+            Ok(extended_data) => match extended_data.data {
+                ParsedData::PrimitiveU8 {
+                    value,
+                    specialty: _,
+                } => Some(value.into()),
+                ParsedData::PrimitiveU16 {
+                    value,
+                    specialty: _,
+                } => Some(value),
+                ParsedData::PrimitiveU32 {
+                    value,
+                    specialty: _,
+                } => value.try_into().ok(),
+                ParsedData::PrimitiveU64 {
+                    value,
+                    specialty: _,
+                } => value.try_into().ok(),
+                ParsedData::PrimitiveU128 {
+                    value,
+                    specialty: _,
+                } => value.try_into().ok(),
+                _ => None,
+            },
+            Err(_) => None,
+        }
+    } else {
+        None
+    }
+}
+
+pub async fn get_nonce(
+    client: &WsClient,
+    account_id: &str,
+    tx: tokio::sync::oneshot::Sender<Value>,
+) {
+    let rpc_params = rpc_params![account_id];
+    let blah = client.request("account_nextIndex", rpc_params).await.unwrap();
+    tokio::spawn(async move {
+        //TODO lol this should probably build an own client or send to client manager thread
+        //instead
+        tx.send(blah);
+    });
+}
+
+pub async fn send_stuff(client: &WsClient, data: &str) {
+    let rpc_params = rpc_params![data];
+    let mut subscription: Subscription<Value> = client
+        .subscribe("author_submitAndWatchExtrinsic", rpc_params, "")
+        .await.unwrap();
+    let _reply = subscription.next().await.unwrap();
+}
+
+pub fn block_number_query(
+    metadata_v15: &RuntimeMetadataV15,
+) -> FinalizedStorageQuery {
+    let storage_selector = StorageSelector::init(&mut (), metadata_v15).unwrap();
+
+    if let StorageSelector::Functional(mut storage_selector_functional) = storage_selector {
+        let mut index_system_in_pallet_selector = None;
+
+        for (index, pallet) in storage_selector_functional
+            .available_pallets
+            .iter()
+            .enumerate()
+        {
+            if pallet.prefix == "System" {
+                index_system_in_pallet_selector = Some(index);
+                break;
+            }
+        }
+
+        if let Some(index_system_in_pallet_selector) = index_system_in_pallet_selector {
+            // System - Number (current block number)
+            storage_selector_functional =
+                StorageSelectorFunctional::new_at::<(), RuntimeMetadataV15>(
+                    &storage_selector_functional.available_pallets,
+                    &mut (),
+                    &metadata_v15.types,
+                    index_system_in_pallet_selector,
+                ).unwrap();
+
+            if let EntrySelector::Functional(ref mut entry_selector_functional) =
+                storage_selector_functional.query.entry_selector
+            {
+                let mut entry_index = None;
+                for (index, entry) in entry_selector_functional
+                    .available_entries
+                    .iter()
+                    .enumerate()
+                {
+                    if entry.name == "Number" {
+                        entry_index = Some(index);
+                        break;
+                    }
+                }
+                if let Some(entry_index) = entry_index {
+                    *entry_selector_functional =
+                        EntrySelectorFunctional::new_at::<(), RuntimeMetadataV15>(
+                            &entry_selector_functional.available_entries,
+                            &mut (),
+                            &metadata_v15.types,
+                            entry_index,
+                        ).unwrap();
+
+                    storage_selector_functional
+                        .query
+                        .finalize()
+                        .transpose().unwrap().unwrap()
+                } else {
+                    panic!("ChainError::NoBlockNumberDefinition")
+                }
+            } else {
+                panic!("ChainError::NoStorageInSystem")
+            }
+        } else {
+            panic!("ChainError::NoSystem")
+        }
+    } else {
+        panic!("ChainError::NoStorage")
+    }
+}
+

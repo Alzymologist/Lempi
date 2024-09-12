@@ -2,9 +2,7 @@ use mnemonic_external::{regular::InternalWordList, WordSet};
 
 use primitive_types::H256;
 
-use substrate_crypto_light::{common::cut_path, sr25519};
-
-use substrate_parser::additional_types::AccountId32;
+use substrate_crypto_light::{common::{AccountId32, AsBase58, cut_path}, sr25519};
 
 #[derive(Debug)]
 pub enum Error {
@@ -69,7 +67,7 @@ impl Address {
         format!(
             "[{}] {}",
             self.own_symbol(),
-            self.into_account_id32().as_base58(ss58).to_string()
+            self.into_account_id32().to_base58_string(ss58).to_string()
         )
     }
 

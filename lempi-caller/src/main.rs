@@ -54,7 +54,7 @@ async fn main() -> Result<(), Error> {
     let metadata = bc.metadata().clone();
     let genesis_hash = bc.genesis_hash();
     let specs = bc.specs();
-    let ss58 = if let Some(Value::Number(a)) = specs.get("ss58Format") {
+/*    let ss58 = if let Some(Value::Number(a)) = specs.get("ss58Format") {
         if let Some(b) = a.as_u64() {
             b as u16
         } else {
@@ -63,11 +63,12 @@ async fn main() -> Result<(), Error> {
     } else {
         42
     };
-
-    let address_book = AddressBook::init(ss58);
+*/
+    let address_book = AddressBook::init(specs.base58prefix);
 
     let mut builder = Builder::new(&metadata, &address_book, genesis_hash, specs);
     let mut hash = bc.block();
+    let mut number = bc.block_number();
 
     let caps = Capabilities::new_from_env()?;
 
@@ -132,12 +133,12 @@ async fn main() -> Result<(), Error> {
 
         let updated = bc.crank();
         let nonce = if let Some(a) = builder.author() {
-            bc.nonce(a, builder.ss58)
+            bc.nonce(a).await
         } else {
             None
         };
         if updated {
-            builder.autofill(hash, nonce);
+            builder.autofill(hash, number, nonce);
             buf.draw_from_screen(
                 call_field.render(builder.call(), &builder.position()),
                 scaffold.call().column(),
@@ -149,6 +150,7 @@ async fn main() -> Result<(), Error> {
                 scaffold.details_panel().line(),
             );
             hash = bc.block();
+            number = bc.block_number();
             block.add_change(Change::ClearScreen(AnsiColor::Grey.into()));
             block.add_change(format!("Last block: {}", &hash));
             buf.draw_from_screen(&block, scaffold.block().column(), scaffold.block().line());
@@ -200,6 +202,7 @@ async fn main() -> Result<(), Error> {
                             ..
                         } => {
                             builder.enter();
+                            builder.autofill(hash, number, nonce);
                         }
                         KeyEvent {
                             key: KeyCode::Backspace,
@@ -211,7 +214,7 @@ async fn main() -> Result<(), Error> {
                             key: KeyCode::Tab, ..
                         } => {
                             if let Some(a) = builder.submittable_signed() {
-                                bc.send(&a);
+                                bc.send(&a).await;
                             }
                         }
                         KeyEvent {
