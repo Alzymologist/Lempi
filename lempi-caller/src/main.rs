@@ -38,16 +38,16 @@ use scaffold::Scaffold;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Name of the person to greet
-    #[arg(short, long, default_value_t = String::from("polkadot"))]
-    chainspec: String,
+    /// RPC endpoint
+    #[arg(short, long, default_value_t = String::from("wss://polkadot-asset-hub-rpc.polkadot.io"))]
+    endpoint: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let args = Args::parse();
 
-    let mut bc = chain::Blockchain::new(&format!("../chain-specs/{}.json", args.chainspec)).await;
+    let mut bc = chain::Blockchain::new(&args.endpoint).await;
 
     // TODO: this should be a reference and builder should die and be reborn
     // if this changes

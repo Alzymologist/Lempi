@@ -73,6 +73,8 @@ impl<'a, 'b> Builder<'a, 'b> {
         specs: ShortSpecs,
     ) -> Self {
         let mut transaction = TransactionToFill::init(&mut (), metadata, genesis_hash).unwrap();
+//        println!("{:?}", transaction);
+//        panic!();
         Self {
             address_book,
             buffer: "".to_owned(),
@@ -358,6 +360,23 @@ impl<'a, 'b> Builder<'a, 'b> {
         if let Some(a) = nonce {
             self.transaction.populate_nonce(a as u32)
         };
+        if let Some(s) = self.author() {
+            if let Some(pos) =
+                self.address_book.authors().iter().position(|a| a.public() == s)
+            {
+                if let Some(signable) = self.signable() {
+                    if let Some(signature) = self.address_book.authors()[pos].sign(&signable)
+                    {
+                        if let TypeContentToFill::Variant(ref mut multisig) = self.transaction.signature.content {
+                            if let TypeContentToFill::ArrayU8(ref mut sr25519) = multisig.selected.fields_to_fill[0].type_to_fill.content {
+                                sr25519.content = signature.0.to_vec();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
     }
 
     pub fn log(&mut self) -> String {

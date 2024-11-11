@@ -133,8 +133,8 @@ pub struct Blockchain {
 }
 
 impl Blockchain {
-    pub async fn new(specpath: &str) -> Self {
-        let client = WsClientBuilder::default().build(/*"wss://polkadot.api.onfinality.io/public-ws").await.unwrap();*/"wss://rpc.polkadot.io").await.unwrap();
+    pub async fn new(endpoint: &str) -> Self {
+        let client = WsClientBuilder::default().build(endpoint).await.unwrap();
         let genesis_hash = genesis_hash(&client).await;
         let mut blocks = subscribe_blocks(&client).await;
         let block = next_block(&client, &mut blocks).await;
